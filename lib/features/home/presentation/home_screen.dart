@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../matches/data/api/football_api_service.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../matches/data/mock_matches_repository.dart';
@@ -8,36 +9,52 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
+  @override
   Widget build(BuildContext context) {
-    final matches = const MockMatchesRepository().getTodayMatches();
-    final topTips = matches.where((m) => m.isTopTip).length;
-    final lowRisk = matches.where((m) => m.riskLabel == 'Niedrig').length;
-
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('Heute'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          _TodayDashboardCard(
-            totalMatches: matches.length,
-            topTips: topTips,
-            lowRisk: lowRisk,
-          ),
-          const SizedBox(height: 14),
-          const _QuickFilterRow(),
-          const SizedBox(height: 16),
-          const _SectionTitle(title: 'Alle Spiele heute'),
-          const SizedBox(height: 10),
-          ...matches.map(
-                (match) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: MatchCard(match: match),
-            ),
-          ),
-        ],
+      body: FutureBuilder(
+        future: const FootballApiService().fetchTodayFixtures(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Text(
+                'Fehler: ${snapshot.error}',
+                style: const TextStyle(color: Colors.red),
+              ),
+            );
+          }
+
+          final matches = snapshot.data ?? [];
+
+          if (matches.isEmpty) {
+            return const Center(
+              child: Text(
+                'Keine Spiele gefunden',
+                style: TextStyle(color: Colors.white),
+              ),
+            );
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            itemCount: matches.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final match = matches[index];
+              return MatchCard(match: match);
+            },
+          );
+        },
       ),
     );
   }

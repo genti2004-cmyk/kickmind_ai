@@ -16,15 +16,23 @@ enum RiskLevel {
 
 class FootballMatch {
   final String id;
+  final int? fixtureId;
+  final int? leagueId;
+  final int? homeTeamId;
+  final int? awayTeamId;
+  final int season;
+
   final String league;
   final String homeTeam;
   final String awayTeam;
   final DateTime kickoff;
+
   final TipType tipType;
   final String tipLabel;
   final int aiScore;
   final RiskLevel riskLevel;
   final double odds;
+
   final int homeFormScore;
   final int awayFormScore;
   final int goalsScore;
@@ -32,6 +40,11 @@ class FootballMatch {
 
   const FootballMatch({
     required this.id,
+    this.fixtureId,
+    this.leagueId,
+    this.homeTeamId,
+    this.awayTeamId,
+    required this.season,
     required this.league,
     required this.homeTeam,
     required this.awayTeam,

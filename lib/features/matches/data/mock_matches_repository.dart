@@ -121,6 +121,7 @@ class MockMatchesRepository {
 
     return FootballMatch(
       id: id,
+      season: DateTime.now().year,
       league: league,
       homeTeam: homeTeam,
       awayTeam: awayTeam,
