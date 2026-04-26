@@ -16,41 +16,58 @@ class FootballApiService {
 
     final now = DateTime.now();
     final season = now.year;
-    final date =
-        '${now.year.toString().padLeft(4, '0')}-'
-        '${now.month.toString().padLeft(2, '0')}-'
-        '${now.day.toString().padLeft(2, '0')}';
 
-    final uri = Uri.parse(
-      '${ApiConfig.footballBaseUrl}/fixtures?date=$date&timezone=Europe/Berlin',
-    );
+    final allFixtures = <FootballMatch>[];
 
-    final response = await http.get(uri, headers: _headers);
+    for (int i = 0; i < 3; i++) {
+      final dateTime = now.add(Duration(days: i));
+      final date = _formatDate(dateTime);
 
-    if (response.statusCode != 200) {
-      throw Exception('API Fehler: ${response.statusCode}');
-    }
-
-    final json = jsonDecode(response.body) as Map<String, dynamic>;
-    final items = (json['response'] as List<dynamic>? ?? []);
-
-    final fixtures = items.take(20).toList();
-    final result = <FootballMatch>[];
-
-    for (final raw in fixtures) {
-      final match = await _mapFixtureWithAnalysis(
-        raw as Map<String, dynamic>,
-        season: season,
+      final uri = Uri.parse(
+        '${ApiConfig.footballBaseUrl}/fixtures?date=$date&timezone=Europe/Berlin',
       );
-      result.add(match);
+
+      final response = await http.get(uri, headers: _headers);
+
+      print('API STATUS: ${response.statusCode}');
+      print('API BODY: ${response.body}');
+
+      if (response.statusCode != 200) {
+        continue;
+      }
+
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final items = (json['response'] as List<dynamic>? ?? []);
+
+      for (final raw in items.take(15)) {
+        final match = await _mapFixtureWithAnalysis(
+          raw as Map<String, dynamic>,
+          season: season,
+        );
+        allFixtures.add(match);
+      }
+
+      if (allFixtures.length >= 20) break;
     }
 
-    return result;
+    if (allFixtures.isEmpty) {
+      print('⚠️ API leer → fallback aktiv');
+      return _fallbackMatches();
+    }
+
+    return allFixtures
+      ..sort((a, b) => a.kickoff.compareTo(b.kickoff));
   }
 
   Map<String, String> get _headers => {
     'x-apisports-key': ApiConfig.footballApiKey,
   };
+
+  String _formatDate(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+  }
 
   Future<FootballMatch> _mapFixtureWithAnalysis(
       Map<String, dynamic> map, {
@@ -116,7 +133,6 @@ class FootballApiService {
       fixtureId: fixtureId,
       tipType: tip.type,
     );
-
 
     const engine = PredictionEngine();
 
@@ -253,12 +269,6 @@ class FootballApiService {
       }
     }
 
-    if (odds.isEmpty) {
-      return 1.75;
-    }
-
-    odds.sort();
-
     final safeOdds = odds.where((odd) => odd >= 1.20 && odd <= 3.50).toList();
 
     if (safeOdds.isEmpty) {
@@ -347,6 +357,10 @@ class FootballApiService {
       return const _TipPick(TipType.homeWin, 'Heimsieg');
     }
 
+    if (edge <= -14) {
+      return const _TipPick(TipType.awayWin, 'Auswärtssieg');
+    }
+
     if (edge >= 6) {
       return const _TipPick(TipType.doubleChance, '1X');
     }
@@ -361,6 +375,47 @@ class FootballApiService {
   int? _asInt(dynamic value) {
     if (value is int) return value;
     return int.tryParse(value?.toString() ?? '');
+  }
+
+  List<FootballMatch> _fallbackMatches() {
+    final now = DateTime.now();
+
+    return [
+      FootballMatch(
+        id: 'fallback1',
+        season: now.year,
+        league: 'Demo League',
+        homeTeam: 'Team Alpha',
+        awayTeam: 'Team Beta',
+        kickoff: now,
+        tipType: TipType.homeWin,
+        tipLabel: 'Heimsieg',
+        aiScore: 82,
+        riskLevel: RiskLevel.low,
+        odds: 1.75,
+        homeFormScore: 80,
+        awayFormScore: 60,
+        goalsScore: 75,
+        shortReason: 'Fallback Daten – API hat keine Spiele geliefert.',
+      ),
+      FootballMatch(
+        id: 'fallback2',
+        season: now.year,
+        league: 'Demo League',
+        homeTeam: 'Team Gamma',
+        awayTeam: 'Team Delta',
+        kickoff: now.add(const Duration(hours: 2)),
+        tipType: TipType.over25,
+        tipLabel: 'Über 2.5 Tore',
+        aiScore: 79,
+        riskLevel: RiskLevel.medium,
+        odds: 1.88,
+        homeFormScore: 74,
+        awayFormScore: 70,
+        goalsScore: 86,
+        shortReason: 'Fallback Daten – Tortrend als Beispielanalyse.',
+      ),
+    ];
   }
 }
 
