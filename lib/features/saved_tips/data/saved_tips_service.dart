@@ -32,15 +32,33 @@ class SavedTipsService {
     await prefs.setStringList(_key, current);
   }
 
+  Future<void> updateResult(String id, TipResult result) async {
+    final tips = await loadTips();
+
+    final updated = tips.map((tip) {
+      if (tip.id == id) {
+        return tip.copyWith(result: result);
+      }
+      return tip;
+    }).toList();
+
+    await _saveAll(updated);
+  }
+
   Future<void> deleteTip(String id) async {
+    final tips = await loadTips();
+    final updated = tips.where((tip) => tip.id != id).toList();
+
+    await _saveAll(updated);
+  }
+
+  Future<void> _saveAll(List<SavedTip> tips) async {
     final prefs = await SharedPreferences.getInstance();
-    final current = prefs.getStringList(_key) ?? [];
 
-    current.removeWhere((raw) {
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      return map['id']?.toString() == id;
-    });
+    final rawList = tips
+        .map((tip) => jsonEncode(tip.toJson()))
+        .toList();
 
-    await prefs.setStringList(_key, current);
+    await prefs.setStringList(_key, rawList);
   }
 }
