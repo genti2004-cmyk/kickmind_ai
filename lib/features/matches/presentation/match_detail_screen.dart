@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../saved_tips/data/saved_tips_service.dart';
+import '../../saved_tips/domain/saved_tip.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../domain/football_match.dart';
@@ -44,6 +46,11 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
             match: match,
             controller: stakeController,
             onChanged: () => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          _SaveTipButton(
+            match: match,
+            stakeController: stakeController,
           ),
           const SizedBox(height: 16),
           const _SectionTitle(title: 'Analysewerte'),
@@ -534,6 +541,61 @@ class _SectionTitle extends StatelessWidget {
         color: AppTheme.text,
         fontSize: 17,
         fontWeight: FontWeight.w900,
+      ),
+    );
+  }
+}
+class _SaveTipButton extends StatelessWidget {
+  final FootballMatch match;
+  final TextEditingController stakeController;
+
+  const _SaveTipButton({
+    required this.match,
+    required this.stakeController,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: () async {
+        final rawStake = stakeController.text.replaceAll(',', '.');
+        final stake = double.tryParse(rawStake) ?? 0;
+
+        final tip = SavedTip(
+          id: match.id,
+          league: match.league,
+          homeTeam: match.homeTeam,
+          awayTeam: match.awayTeam,
+          tipLabel: match.tipLabel,
+          aiScore: match.aiScore,
+          odds: match.odds,
+          stake: stake,
+          savedAt: DateTime.now(),
+        );
+
+        await const SavedTipsService().saveTip(tip);
+
+        if (!context.mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tipp gespeichert'),
+          ),
+        );
+      },
+      icon: const Icon(Icons.bookmark_add_rounded),
+      label: const Text('Tipp speichern'),
+      style: FilledButton.styleFrom(
+        backgroundColor: AppTheme.blue,
+        foregroundColor: Colors.white,
+        minimumSize: const Size.fromHeight(52),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        textStyle: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }

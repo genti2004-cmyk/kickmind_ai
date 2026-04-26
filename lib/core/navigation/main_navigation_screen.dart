@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import '../../features/analysis/presentation/analysis_screen.dart';
 import '../../features/filters/presentation/filter_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
-import 'package:kickmind_ai/features/top_tips/presentation/top_tips_screen.dart';
+import '../../features/saved_tips/presentation/saved_tips_screen.dart';
+import '../../features/top_tips/presentation/top_tips_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -19,6 +20,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     HomeScreen(),
     AnalysisScreen(),
     TopTipsScreen(),
+    SavedTipsScreen(),
     FilterScreen(),
   ];
 
@@ -44,6 +46,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.star_rounded),
             label: 'Top Tipps',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.bookmark_rounded),
+            label: 'Meine Tipps',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.tune_rounded),
