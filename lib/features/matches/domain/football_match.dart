@@ -16,6 +16,7 @@ enum RiskLevel {
 
 class FootballMatch {
   final String id;
+
   final int? fixtureId;
   final int? leagueId;
   final int? homeTeamId;
@@ -61,6 +62,14 @@ class FootballMatch {
   });
 
   bool get isTopTip => aiScore >= 75;
+
+  bool get isStrongTip {
+    final safeOdds = odds >= 1.20 && odds <= 2.80;
+    final goodRisk =
+        riskLevel == RiskLevel.low || riskLevel == RiskLevel.medium;
+
+    return aiScore >= 78 && safeOdds && goodRisk;
+  }
 
   String get riskLabel {
     switch (riskLevel) {

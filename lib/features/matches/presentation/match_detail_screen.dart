@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../domain/football_match.dart';
 
-class MatchDetailScreen extends StatelessWidget {
+class MatchDetailScreen extends StatefulWidget {
   final FootballMatch match;
 
   const MatchDetailScreen({
@@ -12,9 +12,21 @@ class MatchDetailScreen extends StatelessWidget {
   });
 
   @override
+  State<MatchDetailScreen> createState() => _MatchDetailScreenState();
+}
+
+class _MatchDetailScreenState extends State<MatchDetailScreen> {
+  final TextEditingController stakeController = TextEditingController(text: '10');
+
+  @override
+  void dispose() {
+    stakeController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final hasApiIds =
-        match.fixtureId != null && match.leagueId != null && match.homeTeamId != null && match.awayTeamId != null;
+    final match = widget.match;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -26,11 +38,15 @@ class MatchDetailScreen extends StatelessWidget {
         children: [
           _HeaderCard(match: match),
           const SizedBox(height: 14),
-          _SourceCard(hasApiIds: hasApiIds),
-          const SizedBox(height: 14),
           _RecommendationCard(match: match),
+          const SizedBox(height: 14),
+          _ProfitSimulator(
+            match: match,
+            controller: stakeController,
+            onChanged: () => setState(() {}),
+          ),
           const SizedBox(height: 16),
-          _SectionTitle(title: 'Analysewerte'),
+          const _SectionTitle(title: 'Analysewerte'),
           const SizedBox(height: 10),
           _MetricBar(title: 'Heimform', value: match.homeFormScore),
           const SizedBox(height: 12),
@@ -62,18 +78,8 @@ class _HeaderCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(
-          colors: [
-            Color(0xFF063A68),
-            Color(0xFF0B1B2E),
-          ],
+          colors: [Color(0xFF063A68), Color(0xFF0B1B2E)],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.blue.withOpacity(0.18),
-            blurRadius: 22,
-            offset: const Offset(0, 10),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -113,46 +119,6 @@ class _HeaderCard extends StatelessWidget {
               const Spacer(),
               _MiniBadge(label: 'Saison ${match.season}'),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SourceCard extends StatelessWidget {
-  final bool hasApiIds;
-
-  const _SourceCard({required this.hasApiIds});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.blue.withOpacity(0.12)),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            hasApiIds ? Icons.cloud_done_rounded : Icons.info_outline_rounded,
-            color: AppTheme.blue,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              hasApiIds
-                  ? 'Live-Daten erkannt. Analyse basiert auf API-Spiel- und Teamdaten.'
-                  : 'Teilweise Fallback-Daten. Analyse wird automatisch verbessert, sobald API-Werte verfügbar sind.',
-              style: const TextStyle(
-                color: AppTheme.mutedText,
-                fontSize: 13,
-                height: 1.35,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
           ),
         ],
       ),
@@ -234,6 +200,143 @@ class _RecommendationCard extends StatelessWidget {
   }
 }
 
+class _ProfitSimulator extends StatelessWidget {
+  final FootballMatch match;
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+
+  const _ProfitSimulator({
+    required this.match,
+    required this.controller,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rawStake = controller.text.replaceAll(',', '.');
+    final stake = double.tryParse(rawStake) ?? 0;
+    final payout = stake * match.odds;
+    final profit = payout - stake;
+    final hitChance = match.aiScore.clamp(1, 95);
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppTheme.blue.withOpacity(0.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '💰 Gewinn Simulation',
+            style: TextStyle(
+              color: AppTheme.text,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: controller,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) => onChanged(),
+            style: const TextStyle(
+              color: AppTheme.text,
+              fontWeight: FontWeight.w800,
+            ),
+            decoration: InputDecoration(
+              labelText: 'Einsatz in €',
+              labelStyle: const TextStyle(color: AppTheme.mutedText),
+              prefixIcon: const Icon(Icons.euro_rounded, color: AppTheme.blue),
+              filled: true,
+              fillColor: AppTheme.card,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: AppTheme.blue.withOpacity(0.12)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: AppTheme.blue),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _SimBox(
+                  label: 'Auszahlung',
+                  value: '${payout.toStringAsFixed(2)} €',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SimBox(
+                  label: 'Profit',
+                  value: '${profit.toStringAsFixed(2)} €',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _SimBox(
+            label: 'geschätzte Trefferchance',
+            value: '$hitChance%',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SimBox extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _SimBox({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              color: AppTheme.blue,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppTheme.mutedText,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MetricBar extends StatelessWidget {
   final String title;
   final int value;
@@ -252,7 +355,6 @@ class _MetricBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.blue.withOpacity(0.10)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -304,7 +406,6 @@ class _ReasonCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppTheme.blue.withOpacity(0.10)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -340,7 +441,6 @@ class _ApiInfoCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.blue.withOpacity(0.10)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -408,7 +508,6 @@ class _MiniBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.background.withOpacity(0.45),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppTheme.blue.withOpacity(0.10)),
       ),
       child: Text(
         label,

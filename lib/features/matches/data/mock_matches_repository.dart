@@ -34,51 +34,12 @@ class MockMatchesRepository {
         awayFormScore: 76,
         goalsScore: 91,
       ),
-      _buildMatch(
-        id: 'match_003',
-        league: 'La Liga',
-        homeTeam: 'Real Madrid',
-        awayTeam: 'Valencia',
-        kickoff: DateTime(now.year, now.month, now.day, 21, 00),
-        tipType: TipType.doubleChance,
-        tipLabel: '1X',
-        odds: 1.28,
-        homeFormScore: 86,
-        awayFormScore: 61,
-        goalsScore: 70,
-      ),
-      _buildMatch(
-        id: 'match_004',
-        league: 'Serie A',
-        homeTeam: 'Inter Mailand',
-        awayTeam: 'Lazio Rom',
-        kickoff: DateTime(now.year, now.month, now.day, 19, 45),
-        tipType: TipType.bothTeamsScore,
-        tipLabel: 'Beide treffen',
-        odds: 1.83,
-        homeFormScore: 77,
-        awayFormScore: 72,
-        goalsScore: 84,
-      ),
-      _buildMatch(
-        id: 'match_005',
-        league: 'Ligue 1',
-        homeTeam: 'PSG',
-        awayTeam: 'Lille',
-        kickoff: DateTime(now.year, now.month, now.day, 17, 00),
-        tipType: TipType.homeWin,
-        tipLabel: 'Heimsieg',
-        odds: 1.58,
-        homeFormScore: 80,
-        awayFormScore: 68,
-        goalsScore: 73,
-      ),
     ];
   }
 
   List<FootballMatch> getTopTips() {
     return getTodayMatches()
-        .where((match) => match.isTopTip)
+        .where((match) => match.isStrongTip)
         .toList()
       ..sort((a, b) => b.aiScore.compareTo(a.aiScore));
   }
