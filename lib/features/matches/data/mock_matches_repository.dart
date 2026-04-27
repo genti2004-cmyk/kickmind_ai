@@ -87,6 +87,7 @@ class MockMatchesRepository {
       homeTeam: homeTeam,
       awayTeam: awayTeam,
       kickoff: kickoff,
+      kickoffLabel: _buildKickoffLabel(kickoff),
       tipType: tipType,
       tipLabel: tipLabel,
       aiScore: aiScore,
@@ -98,4 +99,11 @@ class MockMatchesRepository {
       shortReason: reason,
     );
   }
+  String _buildKickoffLabel(DateTime kickoff) {
+    final time =
+        '${kickoff.hour.toString().padLeft(2, '0')}:${kickoff.minute.toString().padLeft(2, '0')}';
+
+    return 'Demo • $time';
+  }
+
 }

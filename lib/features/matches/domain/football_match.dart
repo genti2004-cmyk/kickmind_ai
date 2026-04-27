@@ -1,32 +1,31 @@
 enum TipType {
   homeWin,
-  draw,
   awayWin,
+  draw,
   doubleChance,
   over25,
   under25,
-  bothTeamsScore,
+  bothTeamsScore
 }
 
-enum RiskLevel {
-  low,
-  medium,
-  high,
-}
+enum RiskLevel { low, medium, high }
 
 class FootballMatch {
   final String id;
 
+  // 🔥 WICHTIG (für alte Screens)
   final int? fixtureId;
   final int? leagueId;
   final int? homeTeamId;
   final int? awayTeamId;
-  final int season;
 
+  final int season;
   final String league;
   final String homeTeam;
   final String awayTeam;
+
   final DateTime kickoff;
+  final String kickoffLabel;
 
   final TipType tipType;
   final String tipLabel;
@@ -37,9 +36,10 @@ class FootballMatch {
   final int homeFormScore;
   final int awayFormScore;
   final int goalsScore;
+
   final String shortReason;
 
-  const FootballMatch({
+  FootballMatch({
     required this.id,
     this.fixtureId,
     this.leagueId,
@@ -50,6 +50,7 @@ class FootballMatch {
     required this.homeTeam,
     required this.awayTeam,
     required this.kickoff,
+    required this.kickoffLabel,
     required this.tipType,
     required this.tipLabel,
     required this.aiScore,
@@ -61,16 +62,7 @@ class FootballMatch {
     required this.shortReason,
   });
 
-  bool get isTopTip => aiScore >= 75;
-
-  bool get isStrongTip {
-    final safeOdds = odds >= 1.20 && odds <= 2.80;
-    final goodRisk =
-        riskLevel == RiskLevel.low || riskLevel == RiskLevel.medium;
-
-    return aiScore >= 78 && safeOdds && goodRisk;
-  }
-
+  // 🔥 Risiko Label
   String get riskLabel {
     switch (riskLevel) {
       case RiskLevel.low:
@@ -80,5 +72,13 @@ class FootballMatch {
       case RiskLevel.high:
         return 'Hoch';
     }
+  }
+
+  // 🔥 Starke Tipps
+  bool get isStrongTip {
+    return aiScore >= 78 &&
+        odds >= 1.5 &&
+        odds <= 2.5 &&
+        riskLevel != RiskLevel.high;
   }
 }

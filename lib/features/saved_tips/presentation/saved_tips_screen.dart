@@ -1,8 +1,19 @@
 import 'package:flutter/material.dart';
+import '../../matches/domain/football_match.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../data/saved_tips_service.dart';
-import '../domain/saved_tip.dart';
+enum TipResult { open, win, loss }
+
+class SavedTip {
+  final FootballMatch match;
+  final double stake;
+  TipResult result;
+
+  SavedTip({
+    required this.match,
+    required this.stake,
+    this.result = TipResult.open,
+  });
+}
 
 class SavedTipsScreen extends StatefulWidget {
   const SavedTipsScreen({super.key});
@@ -12,238 +23,177 @@ class SavedTipsScreen extends StatefulWidget {
 }
 
 class _SavedTipsScreenState extends State<SavedTipsScreen> {
-  final service = const SavedTipsService();
+  final List<SavedTip> _tips = [];
 
-  Future<List<SavedTip>>? futureTips;
-
+  // 🔥 Beispiel Daten (kannst du später entfernen)
   @override
   void initState() {
     super.initState();
-    reload();
+
+    _tips.addAll([
+      SavedTip(
+        match: FootballMatch(
+          id: '1',
+          season: 2026,
+          league: 'Bundesliga',
+          homeTeam: 'Bayern',
+          awayTeam: 'Dortmund',
+          kickoff: DateTime.now(),
+          kickoffLabel: 'Heute • 20:30',
+          tipType: TipType.over25,
+          tipLabel: 'Über 2.5',
+          aiScore: 82,
+          riskLevel: RiskLevel.low,
+          odds: 1.7,
+          homeFormScore: 80,
+          awayFormScore: 70,
+          goalsScore: 85,
+          shortReason: '',
+        ),
+        stake: 10,
+        result: TipResult.win,
+      ),
+      SavedTip(
+        match: FootballMatch(
+          id: '2',
+          season: 2026,
+          league: 'Bundesliga',
+          homeTeam: 'Leipzig',
+          awayTeam: 'Mainz',
+          kickoff: DateTime.now(),
+          kickoffLabel: 'Heute • 18:30',
+          tipType: TipType.homeWin,
+          tipLabel: 'Heimsieg',
+          aiScore: 75,
+          riskLevel: RiskLevel.medium,
+          odds: 1.9,
+          homeFormScore: 75,
+          awayFormScore: 65,
+          goalsScore: 70,
+          shortReason: '',
+        ),
+        stake: 10,
+        result: TipResult.loss,
+      ),
+    ]);
   }
 
-  void reload() {
-    setState(() {
-      futureTips = service.loadTips();
-    });
+  // ---------------- STATISTIK ----------------
+
+  int get total => _tips.length;
+
+  int get wins => _tips.where((t) => t.result == TipResult.win).length;
+
+  int get losses => _tips.where((t) => t.result == TipResult.loss).length;
+
+  int get open => _tips.where((t) => t.result == TipResult.open).length;
+
+  double get hitRate {
+    if (total == 0) return 0;
+    return (wins / total) * 100;
   }
+
+  double get profit {
+    double p = 0;
+
+    for (final t in _tips) {
+      if (t.result == TipResult.win) {
+        p += t.stake * (t.match.odds - 1);
+      } else if (t.result == TipResult.loss) {
+        p -= t.stake;
+      }
+    }
+
+    return p;
+  }
+
+  double get roi {
+    final invested = _tips.fold<double>(0, (sum, t) => sum + t.stake);
+    if (invested == 0) return 0;
+    return (profit / invested) * 100;
+  }
+
+  // ---------------- UI ----------------
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
       appBar: AppBar(title: const Text('Meine Tipps')),
-      body: FutureBuilder<List<SavedTip>>(
-        future: futureTips,
-        builder: (context, snapshot) {
-          final tips = snapshot.data ?? [];
-
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (tips.isEmpty) {
-            return const Center(
-              child: Text('Noch keine Tipps gespeichert'),
-            );
-          }
-
-          // 🔥 Ranking Logik
-          final ranked = [...tips]
-            ..sort((a, b) {
-              // 1. offene zuerst
-              if (a.result == TipResult.open && b.result != TipResult.open) {
-                return -1;
-              }
-              if (b.result == TipResult.open && a.result != TipResult.open) {
-                return 1;
-              }
-
-              // 2. gewonnene vor verlorenen
-              if (a.result == TipResult.won && b.result == TipResult.lost) {
-                return -1;
-              }
-              if (b.result == TipResult.won && a.result == TipResult.lost) {
-                return 1;
-              }
-
-              // 3. AI Score
-              final scoreCompare = b.aiScore.compareTo(a.aiScore);
-              if (scoreCompare != 0) return scoreCompare;
-
-              // 4. bessere Quote
-              return a.odds.compareTo(b.odds);
-            });
-
-          final bestTips = ranked.take(3).toList();
-
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              const Text(
-                '🏆 Beste Tipps',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              ...bestTips.map(
-                    (tip) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _SavedTipCard(
-                    tip: tip,
-                    highlight: true,
-                    onWon: () async {
-                      await service.updateResult(tip.id, TipResult.won);
-                      reload();
-                    },
-                    onLost: () async {
-                      await service.updateResult(tip.id, TipResult.lost);
-                      reload();
-                    },
-                    onOpen: () async {
-                      await service.updateResult(tip.id, TipResult.open);
-                      reload();
-                    },
-                    onDelete: () async {
-                      await service.deleteTip(tip.id);
-                      reload();
-                    },
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              const Text(
-                'Alle Tipps',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              ...ranked.map(
-                    (tip) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _SavedTipCard(
-                    tip: tip,
-                    onWon: () async {
-                      await service.updateResult(tip.id, TipResult.won);
-                      reload();
-                    },
-                    onLost: () async {
-                      await service.updateResult(tip.id, TipResult.lost);
-                      reload();
-                    },
-                    onOpen: () async {
-                      await service.updateResult(tip.id, TipResult.open);
-                      reload();
-                    },
-                    onDelete: () async {
-                      await service.deleteTip(tip.id);
-                      reload();
-                    },
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+      body: Column(
+        children: [
+          _buildStats(),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _tips.length,
+              itemBuilder: (_, i) => _buildTipCard(_tips[i]),
+            ),
+          ),
+        ],
       ),
     );
   }
-}
 
-class _SavedTipCard extends StatelessWidget {
-  final SavedTip tip;
-  final bool highlight;
-  final VoidCallback onWon;
-  final VoidCallback onLost;
-  final VoidCallback onOpen;
-  final VoidCallback onDelete;
-
-  const _SavedTipCard({
-    required this.tip,
-    this.highlight = false,
-    required this.onWon,
-    required this.onLost,
-    required this.onOpen,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildStats() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: highlight ? Colors.amber.withOpacity(0.15) : AppTheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: highlight
-              ? Colors.amber
-              : AppTheme.blue.withOpacity(0.14),
-        ),
-      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '${tip.homeTeam} vs ${tip.awayTeam}',
-            style: const TextStyle(
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text('${tip.tipLabel} · ${tip.aiScore}% · ${tip.resultLabel}'),
-          const SizedBox(height: 6),
-          Text(
-              'Einsatz ${tip.stake}€ → Profit ${tip.profit.toStringAsFixed(2)}€'),
-
-          const SizedBox(height: 10),
-
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: onWon,
-                  child: const Text('Gewonnen'),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: onLost,
-                  child: const Text('Verloren'),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 6),
-
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: onOpen,
-                  child: const Text('Offen'),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: TextButton(
-                  onPressed: onDelete,
-                  child: const Text('Löschen'),
-                ),
-              ),
-            ],
-          ),
+          _row('Trefferquote', '${hitRate.toStringAsFixed(1)}%'),
+          _row('Gewinn', '${profit.toStringAsFixed(2)} €'),
+          _row('ROI', '${roi.toStringAsFixed(1)}%'),
+          _row('Gewonnen', '$wins'),
+          _row('Verloren', '$losses'),
+          _row('Offen', '$open'),
         ],
+      ),
+    );
+  }
+
+  Widget _row(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTipCard(SavedTip tip) {
+    Color color;
+
+    switch (tip.result) {
+      case TipResult.win:
+        color = Colors.green;
+        break;
+      case TipResult.loss:
+        color = Colors.red;
+        break;
+      default:
+        color = Colors.grey;
+    }
+
+    return Card(
+      margin: const EdgeInsets.all(8),
+      child: ListTile(
+        title: Text('${tip.match.homeTeam} vs ${tip.match.awayTeam}'),
+        subtitle: Text('${tip.match.tipLabel} • Quote ${tip.match.odds}'),
+        trailing: DropdownButton<TipResult>(
+          value: tip.result,
+          onChanged: (v) {
+            setState(() {
+              tip.result = v!;
+            });
+          },
+          items: const [
+            DropdownMenuItem(value: TipResult.open, child: Text('Offen')),
+            DropdownMenuItem(value: TipResult.win, child: Text('Gewonnen')),
+            DropdownMenuItem(value: TipResult.loss, child: Text('Verloren')),
+          ],
+        ),
       ),
     );
   }
