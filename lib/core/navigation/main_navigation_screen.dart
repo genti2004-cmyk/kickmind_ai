@@ -1,59 +1,58 @@
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/features/home/presentation/home_screen.dart';
+import 'package:kickmind_ai/features/saved_tips/presentation/saved_tips_screen.dart';
+import 'package:kickmind_ai/features/settings/presentation/app_info_screen.dart';
 
-import '../../features/analysis/presentation/analysis_screen.dart';
-import '../../features/filters/presentation/filter_screen.dart';
-import '../../features/home/presentation/home_screen.dart';
-import '../../features/saved_tips/presentation/saved_tips_screen.dart';
-import '../../features/top_tips/presentation/top_tips_screen.dart';
+import 'package:kickmind_ai/features/top_tips/presentation/top_tips_screen.dart';
+// Falls du einen TopTipsScreen hast, import aktivieren:
+// import 'package:kickmind_ai/features/tips/presentation/top_tips_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
 
   @override
-  State<MainNavigationScreen> createState() => _MainNavigationScreenState();
+  State<MainNavigationScreen> createState() =>
+      _MainNavigationScreenState();
 }
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
-  int _index = 0;
+  int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    AnalysisScreen(),
-    TopTipsScreen(),
-    SavedTipsScreen(),
-    FilterScreen(),
+  late final List<Widget> _pages = [
+    const HomeScreen(),
+    const TopTipsScreen(),
+    const SavedTipsScreen(),
+    const AppInfoScreen(),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _index,
-        children: _screens,
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (value) => setState(() => _index = value),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.sports_soccer),
+      body: _pages[_currentIndex],
+
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home),
             label: 'Heute',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.analytics_outlined),
-            label: 'Analyse',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.star_rounded),
+          NavigationDestination(
+            icon: Icon(Icons.local_fire_department),
             label: 'Top Tipps',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.bookmark_rounded),
+          NavigationDestination(
+            icon: Icon(Icons.bookmark),
             label: 'Meine Tipps',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.tune_rounded),
-            label: 'Filter',
+          NavigationDestination(
+            icon: Icon(Icons.info),
+            label: 'Info',
           ),
         ],
       ),

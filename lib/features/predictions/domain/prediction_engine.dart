@@ -1,7 +1,199 @@
-import '../../matches/domain/football_match.dart';
+import 'package:kickmind_ai/features/matches/domain/football_match.dart';
+import 'package:kickmind_ai/features/predictions/domain/pro_prediction_input.dart';
 
 class PredictionEngine {
   const PredictionEngine();
+
+  FootballMatch buildProMatch(ProPredictionInput input) {
+    final match = input.match;
+
+    final formScore = _weighted(
+      input.homeStats.overallFormScore,
+      input.awayStats.overallFormScore,
+      0.55,
+    );
+
+    final homePower = input.homeAdvantageScore;
+    final goalsTrend = input.goalsTrendScore;
+    final tablePower = input.tableAdvantageScore;
+    final h2hPower = input.headToHeadScore;
+
+    final aiScore = ((formScore * 0.30) +
+        (homePower * 0.25) +
+        (goalsTrend * 0.20) +
+        (tablePower * 0.15) +
+        (h2hPower * 0.10))
+        .round()
+        .clamp(1, 99);
+
+    final tipLabel = _proTipLabel(
+      input: input,
+      aiScore: aiScore,
+      goalsTrend: goalsTrend,
+    );
+
+    final tipType = _mapLabelToTipType(tipLabel);
+    final odds = estimateOdds(tipType);
+    final risk = calculateRisk(aiScore: aiScore, odds: odds);
+
+    return match.copyWith(
+      tipType: tipType,
+      tipLabel: tipLabel,
+      aiScore: aiScore,
+      riskLevel: risk,
+      odds: odds,
+      homeFormScore: input.homeStats.overallFormScore,
+      awayFormScore: input.awayStats.overallFormScore,
+      goalsScore: goalsTrend,
+      shortReason: buildProReason(
+        tipLabel: tipLabel,
+        aiScore: aiScore,
+        input: input,
+      ),
+    );
+  }
+
+  String buildProReason({
+    required String tipLabel,
+    required int aiScore,
+    required ProPredictionInput input,
+  }) {
+    return '$tipLabel: AI $aiScore. '
+        'Form ${input.homeStats.overallFormScore}:${input.awayStats.overallFormScore}, '
+        'Heimvorteil ${input.homeAdvantageScore}, '
+        'Tore-Trend ${input.goalsTrendScore}, '
+        'Tabelle ${input.tableAdvantageScore}, '
+        'Direkte Duelle ${input.headToHeadScore}.';
+  }
+
+  String _proTipLabel({
+    required ProPredictionInput input,
+    required int aiScore,
+    required int goalsTrend,
+  }) {
+    final formDiff = input.formDifference;
+    final tableScore = input.tableAdvantageScore;
+    final h2h = input.headToHeadScore;
+
+    if (goalsTrend >= 76) return 'Über 2.5';
+    if (goalsTrend <= 38) return 'Unter 2.5';
+
+    if (formDiff >= 16 && tableScore >= 58) return '1';
+    if (formDiff <= -16 && tableScore <= 42) return '2';
+
+    if (formDiff >= 7 && h2h >= 50) return '1X';
+    if (formDiff <= -7 && h2h <= 50) return 'X2';
+
+    if (formDiff.abs() <= 6) return 'X';
+
+    return goalsTrend >= 62 ? 'BTTS' : '12';
+  }
+
+  TipType _mapLabelToTipType(String label) {
+    switch (label) {
+      case '1':
+      case '1X':
+        return TipType.homeWin;
+      case '2':
+      case 'X2':
+        return TipType.awayWin;
+      case 'X':
+        return TipType.draw;
+      case 'Über 2.5':
+        return TipType.over25;
+      case 'Unter 2.5':
+        return TipType.under25;
+      case 'BTTS':
+        return TipType.btts;
+      case '12':
+        return TipType.homeWin;
+      default:
+        return TipType.homeWin;
+    }
+  }
+
+  FootballMatch buildMatch({
+    required String id,
+    int? fixtureId,
+    int? season,
+    required String league,
+    required String home,
+    required String away,
+    required DateTime kickoff,
+    TipType? tipType,
+    double? odds,
+    int? homeFormScore,
+    int? awayFormScore,
+    int? goalsScore,
+  }) {
+    final resolvedHomeForm =
+        homeFormScore ?? _stableScore(home, min: 45, max: 88);
+    final resolvedAwayForm =
+        awayFormScore ?? _stableScore(away, min: 42, max: 86);
+    final resolvedGoalsScore =
+        goalsScore ?? _stableScore('$home-$away-goals', min: 48, max: 90);
+
+    final resolvedTipType = tipType ??
+        _bestTipType(
+          homeFormScore: resolvedHomeForm,
+          awayFormScore: resolvedAwayForm,
+          goalsScore: resolvedGoalsScore,
+        );
+
+    final resolvedOdds = odds ?? estimateOdds(resolvedTipType);
+
+    final aiScore = calculateAiScore(
+      homeFormScore: resolvedHomeForm,
+      awayFormScore: resolvedAwayForm,
+      goalsScore: resolvedGoalsScore,
+      odds: resolvedOdds,
+      tipType: resolvedTipType,
+    );
+
+    final risk = calculateRisk(aiScore: aiScore, odds: resolvedOdds);
+
+    return FootballMatch(
+      id: id,
+      fixtureId: fixtureId,
+      season: season ?? DateTime.now().year,
+      league: league,
+      homeTeam: home,
+      awayTeam: away,
+      kickoff: kickoff,
+      kickoffLabel: _formatKickoff(kickoff),
+      tipType: resolvedTipType,
+      tipLabel: tipLabel(resolvedTipType),
+      aiScore: aiScore,
+      riskLevel: risk,
+      odds: resolvedOdds,
+      homeFormScore: resolvedHomeForm,
+      awayFormScore: resolvedAwayForm,
+      goalsScore: resolvedGoalsScore,
+      shortReason: buildReason(
+        tipType: resolvedTipType,
+        homeFormScore: resolvedHomeForm,
+        awayFormScore: resolvedAwayForm,
+        goalsScore: resolvedGoalsScore,
+        aiScore: aiScore,
+      ),
+    );
+  }
+
+  List<FootballMatch> rankTopTips(
+      List<FootballMatch> matches, {
+        int limit = 5,
+      }) {
+    final sorted = [...matches]
+      ..sort((a, b) {
+        final scoreCompare = b.aiScore.compareTo(a.aiScore);
+        if (scoreCompare != 0) return scoreCompare;
+        return a.odds.compareTo(b.odds);
+      });
+
+    return sorted.take(limit).toList();
+  }
+
+  int smartScore(FootballMatch match) => match.aiScore;
 
   int calculateAiScore({
     required int homeFormScore,
@@ -10,54 +202,29 @@ class PredictionEngine {
     required double odds,
     required TipType tipType,
   }) {
-    final formEdge = (homeFormScore - awayFormScore).abs();
-    final formBalance = ((homeFormScore + awayFormScore) / 2).clamp(1, 99);
+    final formScore = switch (tipType) {
+      TipType.homeWin => homeFormScore,
+      TipType.awayWin => awayFormScore,
+      TipType.draw => (100 - (homeFormScore - awayFormScore).abs()).clamp(40, 95),
+      TipType.over25 => goalsScore,
+      TipType.under25 => 100 - goalsScore,
+      TipType.btts => ((goalsScore + homeFormScore + awayFormScore) / 3).round(),
+    };
 
-    final valueScore = _valueScoreForOdds(odds);
-    final marketFit = _marketFitScore(
-      tipType: tipType,
-      homeFormScore: homeFormScore,
-      awayFormScore: awayFormScore,
-      goalsScore: goalsScore,
-    );
+    final oddsScore = (100 - ((odds - 1.0) * 20)).round().clamp(35, 100);
 
-    double score =
-        (formBalance * 0.26) +
-            (goalsScore * 0.24) +
-            (formEdge * 0.14) +
-            (valueScore * 0.18) +
-            (marketFit * 0.18);
-
-    if (tipType == TipType.doubleChance) {
-      score += 5;
-    }
-
-    if (odds > 3.50) {
-      score -= 14;
-    } else if (odds > 2.80) {
-      score -= 7;
-    }
-
-    if (odds < 1.20) {
-      score -= 6;
-    }
-
-    return score.clamp(1, 99).round();
+    return ((formScore * 0.55) + (goalsScore * 0.25) + (oddsScore * 0.20))
+        .round()
+        .clamp(1, 99);
   }
 
-  RiskLevel calculateRisk({
+  String calculateRisk({
     required int aiScore,
     required double odds,
   }) {
-    if (aiScore >= 82 && odds <= 1.85) {
-      return RiskLevel.low;
-    }
-
-    if (aiScore >= 70 && odds <= 2.60) {
-      return RiskLevel.medium;
-    }
-
-    return RiskLevel.high;
+    if (aiScore >= 82 && odds <= 1.90) return 'Niedrig';
+    if (aiScore >= 70 && odds <= 2.40) return 'Mittel';
+    return 'Hoch';
   }
 
   String buildReason({
@@ -67,101 +234,71 @@ class PredictionEngine {
     required int goalsScore,
     required int aiScore,
   }) {
-    final formEdge = (homeFormScore - awayFormScore).abs();
-
-    if (tipType == TipType.homeWin) {
-      return 'Heimsieg wird bevorzugt, weil Heimform und Gesamtbewertung stärker ausfallen. Formabstand: $formEdge Punkte.';
-    }
-
-    if (tipType == TipType.awayWin) {
-      return 'Auswärtssieg ist interessant, weil das Auswärtsteam statistisch klar stärker wirkt. Formabstand: $formEdge Punkte.';
-    }
-
-    if (tipType == TipType.over25) {
-      return 'Über 2.5 Tore wird bevorzugt, weil der Tortrend mit $goalsScore% stark genug ist.';
-    }
-
-    if (tipType == TipType.under25) {
-      return 'Unter 2.5 Tore wirkt sinnvoll, weil der Tortrend niedrig ausfällt und wenig Offensivdruck erwartet wird.';
-    }
-
-    if (tipType == TipType.bothTeamsScore) {
-      return 'Beide Teams treffen ist interessant, weil Form und Tortrend ausgeglichen genug sind.';
-    }
-
-    if (tipType == TipType.doubleChance) {
-      return 'Doppelchance reduziert Risiko. Der Formabstand liegt bei $formEdge Punkten.';
-    }
-
-    if (aiScore >= 82) {
-      return 'Sehr starke Gesamtbewertung mit guter Datenlage und akzeptabler Quote.';
-    }
-
-    if (aiScore >= 70) {
-      return 'Solide Prognose, aber mit mittlerem Risiko.';
-    }
-
-    return 'Prognose ist möglich, aber Risiko und Datenlage sind nicht optimal.';
+    final tip = tipLabel(tipType);
+    return '$tip: AI $aiScore. Form $homeFormScore:$awayFormScore, Tore-Score $goalsScore.';
   }
 
-  double _valueScoreForOdds(double odds) {
-    if (odds < 1.20) return 42;
-    if (odds <= 1.45) return 65;
-    if (odds <= 1.85) return 90;
-    if (odds <= 2.30) return 84;
-    if (odds <= 2.80) return 68;
-    if (odds <= 3.50) return 48;
-    return 20;
+  String tipLabel(TipType type) {
+    switch (type) {
+      case TipType.homeWin:
+        return '1';
+      case TipType.draw:
+        return 'X';
+      case TipType.awayWin:
+        return '2';
+      case TipType.over25:
+        return 'Über 2.5';
+      case TipType.under25:
+        return 'Unter 2.5';
+      case TipType.btts:
+        return 'BTTS';
+    }
   }
 
-  double _marketFitScore({
-    required TipType tipType,
+  double estimateOdds(TipType type) {
+    switch (type) {
+      case TipType.homeWin:
+        return 1.78;
+      case TipType.draw:
+        return 3.20;
+      case TipType.awayWin:
+        return 2.15;
+      case TipType.over25:
+        return 1.85;
+      case TipType.under25:
+        return 1.95;
+      case TipType.btts:
+        return 1.82;
+    }
+  }
+
+  TipType _bestTipType({
     required int homeFormScore,
     required int awayFormScore,
     required int goalsScore,
   }) {
-    final edge = homeFormScore - awayFormScore;
-    final absEdge = edge.abs();
+    final diff = homeFormScore - awayFormScore;
 
-    switch (tipType) {
-      case TipType.homeWin:
-        if (edge >= 18) return 96;
-        if (edge >= 10) return 84;
-        if (edge >= 5) return 70;
-        return 45;
+    if (goalsScore >= 78) return TipType.over25;
+    if (goalsScore <= 43) return TipType.under25;
+    if (diff >= 10) return TipType.homeWin;
+    if (diff <= -10) return TipType.awayWin;
+    if (diff.abs() <= 5) return TipType.draw;
+    return TipType.btts;
+  }
 
-      case TipType.awayWin:
-        if (edge <= -18) return 96;
-        if (edge <= -10) return 84;
-        if (edge <= -5) return 70;
-        return 45;
+  int _stableScore(String seed, {required int min, required int max}) {
+    final hash = seed.codeUnits.fold<int>(0, (sum, c) => sum + c);
+    return min + (hash % (max - min + 1));
+  }
 
-      case TipType.doubleChance:
-        if (absEdge >= 10) return 88;
-        if (absEdge >= 5) return 78;
-        return 65;
+  int _weighted(int home, int away, double homeWeight) {
+    return ((home * homeWeight) + (away * (1 - homeWeight))).round();
+  }
 
-      case TipType.over25:
-        if (goalsScore >= 88) return 94;
-        if (goalsScore >= 80) return 84;
-        if (goalsScore >= 72) return 70;
-        return 45;
-
-      case TipType.under25:
-        if (goalsScore <= 45) return 92;
-        if (goalsScore <= 55) return 80;
-        if (goalsScore <= 62) return 68;
-        return 40;
-
-      case TipType.bothTeamsScore:
-        final balance = 100 - absEdge;
-        final combined = (balance * 0.45) + (goalsScore * 0.55);
-        return combined.clamp(1, 99);
-
-      case TipType.draw:
-        if (absEdge <= 4 && goalsScore <= 68) return 82;
-        if (absEdge <= 8) return 66;
-        return 38;
-    }
+  String _formatKickoff(DateTime date) {
+    final h = date.hour.toString().padLeft(2, '0');
+    final m = date.minute.toString().padLeft(2, '0');
+    return '$h:$m';
   }
 }

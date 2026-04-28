@@ -1,64 +1,61 @@
 import 'dart:convert';
 
+import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../domain/saved_tip.dart';
-
 class SavedTipsService {
-  static const String _key = 'saved_tips_v1';
+  static const String _key = 'kickmind_saved_tips_v3';
 
-  const SavedTipsService();
-
-  Future<List<SavedTip>> loadTips() async {
+  Future<List<FootballMatch>> loadSavedTips() async {
     final prefs = await SharedPreferences.getInstance();
-    final rawList = prefs.getStringList(_key) ?? [];
+    final rawItems = prefs.getStringList(_key) ?? const <String>[];
+    final result = <FootballMatch>[];
 
-    return rawList
-        .map((raw) => SavedTip.fromJson(jsonDecode(raw) as Map<String, dynamic>))
-        .toList()
-      ..sort((a, b) => b.savedAt.compareTo(a.savedAt));
-  }
-
-  Future<void> saveTip(SavedTip tip) async {
-    final prefs = await SharedPreferences.getInstance();
-    final current = prefs.getStringList(_key) ?? [];
-
-    current.removeWhere((raw) {
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      return map['id']?.toString() == tip.id;
-    });
-
-    current.add(jsonEncode(tip.toJson()));
-    await prefs.setStringList(_key, current);
-  }
-
-  Future<void> updateResult(String id, TipResult result) async {
-    final tips = await loadTips();
-
-    final updated = tips.map((tip) {
-      if (tip.id == id) {
-        return tip.copyWith(result: result);
+    for (final raw in rawItems) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) {
+          result.add(FootballMatch.fromJson(decoded));
+        }
+      } catch (_) {
+        // Ignore corrupted entries instead of crashing the app.
       }
-      return tip;
-    }).toList();
+    }
 
-    await _saveAll(updated);
+    return result;
   }
 
-  Future<void> deleteTip(String id) async {
-    final tips = await loadTips();
-    final updated = tips.where((tip) => tip.id != id).toList();
-
-    await _saveAll(updated);
+  Future<bool> isSaved(String matchId) async {
+    final items = await loadSavedTips();
+    return items.any((m) => m.id == matchId);
   }
 
-  Future<void> _saveAll(List<SavedTip> tips) async {
+  Future<void> saveTip(FootballMatch match) async {
     final prefs = await SharedPreferences.getInstance();
+    final items = await loadSavedTips();
 
-    final rawList = tips
-        .map((tip) => jsonEncode(tip.toJson()))
-        .toList();
+    final updated = items.where((m) => m.id != match.id).toList()
+      ..insert(0, match);
 
-    await prefs.setStringList(_key, rawList);
+    await prefs.setStringList(
+      _key,
+      updated.map((m) => jsonEncode(m.toJson())).toList(),
+    );
+  }
+
+  Future<void> removeTip(String matchId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final items = await loadSavedTips();
+    final updated = items.where((m) => m.id != matchId).toList();
+
+    await prefs.setStringList(
+      _key,
+      updated.map((m) => jsonEncode(m.toJson())).toList(),
+    );
+  }
+
+  Future<void> clearSavedTips() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);
   }
 }

@@ -1,151 +1,47 @@
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/features/matches/data/api/football_api_service.dart';
+import 'package:kickmind_ai/features/matches/domain/football_match.dart';
+import 'package:kickmind_ai/features/matches/presentation/match_card.dart';
+import 'package:kickmind_ai/features/predictions/domain/prediction_engine.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../matches/data/api/football_api_service.dart';
-import '../../matches/domain/football_match.dart';
-import '../../matches/presentation/match_card.dart';
-
-class AnalysisScreen extends StatelessWidget {
+class AnalysisScreen extends StatefulWidget {
   const AnalysisScreen({super.key});
+
+  @override
+  State<AnalysisScreen> createState() => _AnalysisScreenState();
+}
+
+class _AnalysisScreenState extends State<AnalysisScreen> {
+  final FootballApiService _api = FootballApiService();
+  final PredictionEngine _engine = const PredictionEngine();
+  late Future<List<FootballMatch>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _api.fetchTodayFixtures();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Analyse'),
-      ),
+      backgroundColor: const Color(0xFFF4F7FB),
+      appBar: AppBar(title: const Text('Analyse'), backgroundColor: const Color(0xFF0B5EA8), foregroundColor: Colors.white),
       body: FutureBuilder<List<FootballMatch>>(
-        future: const FootballApiService().fetchTodayFixtures(),
+        future: _future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasError) {
-            return Center(
-              child: Text(
-                'Fehler: ${snapshot.error}',
-                style: const TextStyle(color: AppTheme.text),
-                textAlign: TextAlign.center,
-              ),
-            );
-          }
-
-          final List<FootballMatch> matches = snapshot.data ?? <FootballMatch>[];
-
-          if (matches.isEmpty) {
-            return const Center(
-              child: Text(
-                'Keine Analyse-Daten gefunden',
-                style: TextStyle(color: AppTheme.text),
-              ),
-            );
-          }
-
-          final int avgScore =
-              matches.map((m) => m.aiScore).reduce((a, b) => a + b) ~/
-                  matches.length;
-
-          final List<FootballMatch> sortedMatches = [...matches]
-            ..sort((a, b) => b.aiScore.compareTo(a.aiScore));
-
-          final FootballMatch topMatch = sortedMatches.first;
-
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          final matches = snapshot.data ?? const <FootballMatch>[];
+          final top = _engine.rankTopTips(matches, limit: 5);
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            padding: const EdgeInsets.all(16),
             children: [
-              _AnalysisHeader(avgScore: avgScore),
-              const SizedBox(height: 16),
-              const _SectionTitle(title: 'Stärkstes Spiel'),
-              const SizedBox(height: 10),
-              MatchCard(match: topMatch),
-              const SizedBox(height: 18),
-              const _SectionTitle(title: 'Analyse Übersicht'),
-              const SizedBox(height: 10),
-              ...sortedMatches.take(5).map(
-                    (match) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: MatchCard(match: match),
-                ),
-              ),
+              Text('${matches.length} Spiele analysiert', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 14),
+              ...top.map((m) => MatchCard(match: m)),
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _AnalysisHeader extends StatelessWidget {
-  final int avgScore;
-
-  const _AnalysisHeader({required this.avgScore});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF063A68),
-            Color(0xFF0B1B2E),
-          ],
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppTheme.blue.withOpacity(0.14),
-              border: Border.all(color: AppTheme.blue.withOpacity(0.65)),
-            ),
-            child: Text(
-              '$avgScore%',
-              style: const TextStyle(
-                color: AppTheme.blue,
-                fontSize: 21,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          const Expanded(
-            child: Text(
-              'Durchschnittlicher KickMind-Score aller heutigen Live-Spiele.',
-              style: TextStyle(
-                color: AppTheme.text,
-                fontSize: 16,
-                height: 1.35,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  final String title;
-
-  const _SectionTitle({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: const TextStyle(
-        color: AppTheme.text,
-        fontSize: 18,
-        fontWeight: FontWeight.w900,
       ),
     );
   }

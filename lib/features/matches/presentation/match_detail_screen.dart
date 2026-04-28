@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../saved_tips/data/saved_tips_service.dart';
-import '../../saved_tips/domain/saved_tip.dart';
-
-import '../../../core/theme/app_theme.dart';
-import '../domain/football_match.dart';
+import 'package:kickmind_ai/features/matches/domain/football_match.dart';
+import 'package:kickmind_ai/features/saved_tips/data/saved_tips_service.dart';
 
 class MatchDetailScreen extends StatefulWidget {
   final FootballMatch match;
@@ -18,113 +15,154 @@ class MatchDetailScreen extends StatefulWidget {
 }
 
 class _MatchDetailScreenState extends State<MatchDetailScreen> {
-  final TextEditingController stakeController = TextEditingController(text: '10');
+  final SavedTipsService _savedTipsService = SavedTipsService();
+  bool _isSaved = false;
+  bool _loading = true;
+
+  FootballMatch get match => widget.match;
 
   @override
-  void dispose() {
-    stakeController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _checkSaved();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final match = widget.match;
+  Future<void> _checkSaved() async {
+    final saved = await _savedTipsService.isSaved(match.id);
+    if (!mounted) return;
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Spielanalyse'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          _HeaderCard(match: match),
-          const SizedBox(height: 14),
-          _RecommendationCard(match: match),
-          const SizedBox(height: 14),
-          _ProfitSimulator(
-            match: match,
-            controller: stakeController,
-            onChanged: () => setState(() {}),
-          ),
-          const SizedBox(height: 12),
-          _SaveTipButton(
-            match: match,
-            stakeController: stakeController,
-          ),
-          const SizedBox(height: 16),
-          const _SectionTitle(title: 'Analysewerte'),
-          const SizedBox(height: 10),
-          _MetricBar(title: 'Heimform', value: match.homeFormScore),
-          const SizedBox(height: 12),
-          _MetricBar(title: 'Auswärtsform', value: match.awayFormScore),
-          const SizedBox(height: 12),
-          _MetricBar(title: 'Tortrend', value: match.goalsScore),
-          const SizedBox(height: 16),
-          _ReasonCard(reason: match.shortReason),
-          const SizedBox(height: 16),
-          _ApiInfoCard(match: match),
-        ],
+    setState(() {
+      _isSaved = saved;
+      _loading = false;
+    });
+  }
+
+  Future<void> _toggleSaved() async {
+    if (_isSaved) {
+      await _savedTipsService.removeTip(match.id);
+    } else {
+      await _savedTipsService.saveTip(match);
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _isSaved = !_isSaved;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _isSaved ? 'Tipp gespeichert' : 'Tipp entfernt',
+        ),
       ),
     );
   }
-}
-
-class _HeaderCard extends StatelessWidget {
-  final FootballMatch match;
-
-  const _HeaderCard({required this.match});
 
   @override
   Widget build(BuildContext context) {
-    final time =
-        '${match.kickoff.hour.toString().padLeft(2, '0')}:${match.kickoff.minute.toString().padLeft(2, '0')}';
+    final scoreColor = _scoreColor(match.aiScore);
 
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          colors: [Color(0xFF063A68), Color(0xFF0B1B2E)],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Match Analyse'),
+        actions: [
+          IconButton(
+            onPressed: _loading ? null : _toggleSaved,
+            icon: Icon(
+              _isSaved ? Icons.bookmark : Icons.bookmark_border,
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _HeroCard(match: match, scoreColor: scoreColor),
+              const SizedBox(height: 16),
+
+              _SectionTitle('KI Empfehlung'),
+              const SizedBox(height: 10),
+              _RecommendationCard(match: match, scoreColor: scoreColor),
+              const SizedBox(height: 16),
+
+              _SectionTitle('Analysewerte'),
+              const SizedBox(height: 10),
+              _StatsGrid(match: match),
+              const SizedBox(height: 16),
+
+              _SectionTitle('Formvergleich'),
+              const SizedBox(height: 10),
+              _FormComparison(match: match),
+              const SizedBox(height: 16),
+
+              _SectionTitle('Begründung'),
+              const SizedBox(height: 10),
+              _ReasonCard(text: match.shortReason),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Color _scoreColor(int score) {
+    if (score >= 82) return Colors.green;
+    if (score >= 70) return Colors.orange;
+    return Colors.red;
+  }
+}
+
+class _HeroCard extends StatelessWidget {
+  final FootballMatch match;
+  final Color scoreColor;
+
+  const _HeroCard({
+    required this.match,
+    required this.scoreColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _PremiumCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             match.league,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: AppTheme.blue,
-              fontSize: 13,
-              fontWeight: FontWeight.w900,
+            style: TextStyle(
+              color: Colors.grey.shade700,
+              fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Text(
-            '${match.homeTeam}\nvs ${match.awayTeam}',
+            match.teamsLabel,
             style: const TextStyle(
-              color: AppTheme.text,
-              fontSize: 25,
+              fontSize: 22,
               fontWeight: FontWeight.w900,
-              height: 1.22,
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(Icons.schedule_rounded, color: AppTheme.mutedText, size: 18),
+              Icon(Icons.schedule, size: 18, color: Colors.grey.shade700),
               const SizedBox(width: 6),
               Text(
-                '$time Uhr',
-                style: const TextStyle(
-                  color: AppTheme.mutedText,
-                  fontWeight: FontWeight.w800,
+                match.kickoffLabel,
+                style: TextStyle(
+                  color: Colors.grey.shade800,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const Spacer(),
-              _MiniBadge(label: 'Saison ${match.season}'),
+              _Badge(
+                text: 'AI ${match.aiScore}%',
+                color: scoreColor,
+              ),
             ],
           ),
         ],
@@ -135,69 +173,45 @@ class _HeaderCard extends StatelessWidget {
 
 class _RecommendationCard extends StatelessWidget {
   final FootballMatch match;
+  final Color scoreColor;
 
-  const _RecommendationCard({required this.match});
+  const _RecommendationCard({
+    required this.match,
+    required this.scoreColor,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppTheme.blue.withOpacity(0.16)),
-      ),
+    return _PremiumCard(
       child: Row(
         children: [
           Container(
-            width: 76,
-            height: 76,
+            width: 72,
+            height: 72,
             alignment: Alignment.center,
             decoration: BoxDecoration(
+              color: scoreColor.withOpacity(0.12),
               shape: BoxShape.circle,
-              color: AppTheme.blue.withOpacity(0.14),
-              border: Border.all(color: AppTheme.blue.withOpacity(0.65)),
             ),
             child: Text(
-              '${match.aiScore}%',
-              style: const TextStyle(
-                color: AppTheme.blue,
-                fontSize: 21,
+              match.tipLabel,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: scoreColor,
+                fontSize: 18,
                 fontWeight: FontWeight.w900,
               ),
             ),
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                const Text(
-                  'Empfohlener Tipp',
-                  style: TextStyle(
-                    color: AppTheme.mutedText,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  match.tipLabel,
-                  style: const TextStyle(
-                    color: AppTheme.text,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    _MiniBadge(label: 'Quote ${match.odds.toStringAsFixed(2)}'),
-                    _MiniBadge(label: 'Risiko ${match.riskLabel}'),
-                  ],
-                ),
+                _Badge(text: '${match.riskEmoji} ${match.riskLevel}', color: scoreColor),
+                _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: Colors.indigo),
+                _Badge(text: 'Score ${match.aiScore}/100', color: scoreColor),
               ],
             ),
           ),
@@ -207,93 +221,62 @@ class _RecommendationCard extends StatelessWidget {
   }
 }
 
-class _ProfitSimulator extends StatelessWidget {
+class _StatsGrid extends StatelessWidget {
   final FootballMatch match;
-  final TextEditingController controller;
-  final VoidCallback onChanged;
 
-  const _ProfitSimulator({
-    required this.match,
-    required this.controller,
-    required this.onChanged,
-  });
+  const _StatsGrid({required this.match});
 
   @override
   Widget build(BuildContext context) {
-    final rawStake = controller.text.replaceAll(',', '.');
-    final stake = double.tryParse(rawStake) ?? 0;
-    final payout = stake * match.odds;
-    final profit = payout - stake;
-    final hitChance = match.aiScore.clamp(1, 95);
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(child: _StatTile(label: 'Heimform', value: '${match.homeFormScore}')),
+            const SizedBox(width: 10),
+            Expanded(child: _StatTile(label: 'Auswärtsform', value: '${match.awayFormScore}')),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(child: _StatTile(label: 'Tore-Trend', value: '${match.goalsScore}')),
+            const SizedBox(width: 10),
+            Expanded(child: _StatTile(label: 'Saison', value: '${match.season}')),
+          ],
+        ),
+      ],
+    );
+  }
+}
 
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppTheme.blue.withOpacity(0.16)),
-      ),
+class _FormComparison extends StatelessWidget {
+  final FootballMatch match;
+
+  const _FormComparison({required this.match});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = (match.homeFormScore + match.awayFormScore).clamp(1, 200);
+    final homeFactor = match.homeFormScore / total;
+    final awayFactor = match.awayFormScore / total;
+
+    return _PremiumCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '💰 Gewinn Simulation',
-            style: TextStyle(
-              color: AppTheme.text,
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
+          _TeamBar(
+            label: match.homeTeam,
+            value: match.homeFormScore,
+            factor: homeFactor,
+            color: Colors.blue,
           ),
           const SizedBox(height: 14),
-          TextField(
-            controller: controller,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (_) => onChanged(),
-            style: const TextStyle(
-              color: AppTheme.text,
-              fontWeight: FontWeight.w800,
-            ),
-            decoration: InputDecoration(
-              labelText: 'Einsatz in €',
-              labelStyle: const TextStyle(color: AppTheme.mutedText),
-              prefixIcon: const Icon(Icons.euro_rounded, color: AppTheme.blue),
-              filled: true,
-              fillColor: AppTheme.card,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide(color: AppTheme.blue.withOpacity(0.12)),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(color: AppTheme.blue),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _SimBox(
-                  label: 'Auszahlung',
-                  value: '${payout.toStringAsFixed(2)} €',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _SimBox(
-                  label: 'Profit',
-                  value: '${profit.toStringAsFixed(2)} €',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _SimBox(
-            label: 'geschätzte Trefferchance',
-            value: '$hitChance%',
+          _TeamBar(
+            label: match.awayTeam,
+            value: match.awayFormScore,
+            factor: awayFactor,
+            color: Colors.deepPurple,
           ),
         ],
       ),
@@ -301,199 +284,105 @@ class _ProfitSimulator extends StatelessWidget {
   }
 }
 
-class _SimBox extends StatelessWidget {
+class _TeamBar extends StatelessWidget {
   final String label;
-  final String value;
+  final int value;
+  final double factor;
+  final Color color;
 
-  const _SimBox({
+  const _TeamBar({
     required this.label,
     required this.value,
+    required this.factor,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.card,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: const TextStyle(
-              color: AppTheme.blue,
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: AppTheme.mutedText,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricBar extends StatelessWidget {
-  final String title;
-  final int value;
-
-  const _MetricBar({
-    required this.title,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final progress = value.clamp(0, 100) / 100;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: AppTheme.text,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
-              Text(
-                '$value%',
-                style: const TextStyle(
-                  color: AppTheme.blue,
-                  fontWeight: FontWeight.w900,
-                ),
+            ),
+            Text(
+              '$value',
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w900,
               ),
-            ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: factor.clamp(0.05, 1.0),
+            minHeight: 10,
+            backgroundColor: color.withOpacity(0.10),
+            valueColor: AlwaysStoppedAnimation<Color>(color),
           ),
-          const SizedBox(height: 10),
-          LinearProgressIndicator(
-            value: progress,
-            minHeight: 8,
-            borderRadius: BorderRadius.circular(999),
-            backgroundColor: AppTheme.card,
-            color: AppTheme.blue,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
 class _ReasonCard extends StatelessWidget {
-  final String reason;
+  final String text;
 
-  const _ReasonCard({required this.reason});
+  const _ReasonCard({required this.text});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppTheme.card,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.psychology_rounded, color: AppTheme.blue),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              reason,
-              style: const TextStyle(
-                color: AppTheme.text,
-                fontSize: 15,
-                height: 1.4,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
+    return _PremiumCard(
+      child: Text(
+        text.isEmpty ? 'Keine Begründung vorhanden.' : text,
+        style: TextStyle(
+          color: Colors.grey.shade800,
+          height: 1.45,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
 }
 
-class _ApiInfoCard extends StatelessWidget {
-  final FootballMatch match;
-
-  const _ApiInfoCard({required this.match});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionTitle(title: 'API-Daten'),
-          const SizedBox(height: 12),
-          _InfoRow(label: 'Fixture ID', value: match.fixtureId?.toString() ?? '-'),
-          _InfoRow(label: 'League ID', value: match.leagueId?.toString() ?? '-'),
-          _InfoRow(label: 'Home Team ID', value: match.homeTeamId?.toString() ?? '-'),
-          _InfoRow(label: 'Away Team ID', value: match.awayTeamId?.toString() ?? '-'),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
+class _StatTile extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoRow({
+  const _StatTile({
     required this.label,
     required this.value,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 7),
-      child: Row(
+    return _PremiumCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: AppTheme.mutedText,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.grey.shade700,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
             ),
           ),
+          const SizedBox(height: 6),
           Text(
             value,
             style: const TextStyle(
-              color: AppTheme.text,
-              fontSize: 13,
+              fontSize: 22,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -503,25 +392,60 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _MiniBadge extends StatelessWidget {
-  final String label;
+class _PremiumCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
 
-  const _MiniBadge({required this.label});
+  const _PremiumCard({
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      width: double.infinity,
+      padding: padding,
       decoration: BoxDecoration(
-        color: AppTheme.background.withOpacity(0.45),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withOpacity(0.04)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.07),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _Badge({
+    required this.text,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        label,
-        style: const TextStyle(
-          color: AppTheme.mutedText,
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
         ),
       ),
     );
@@ -529,73 +453,17 @@ class _MiniBadge extends StatelessWidget {
 }
 
 class _SectionTitle extends StatelessWidget {
-  final String title;
+  final String text;
 
-  const _SectionTitle({required this.title});
+  const _SectionTitle(this.text);
 
   @override
   Widget build(BuildContext context) {
     return Text(
-      title,
+      text,
       style: const TextStyle(
-        color: AppTheme.text,
         fontSize: 17,
         fontWeight: FontWeight.w900,
-      ),
-    );
-  }
-}
-class _SaveTipButton extends StatelessWidget {
-  final FootballMatch match;
-  final TextEditingController stakeController;
-
-  const _SaveTipButton({
-    required this.match,
-    required this.stakeController,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return FilledButton.icon(
-      onPressed: () async {
-        final rawStake = stakeController.text.replaceAll(',', '.');
-        final stake = double.tryParse(rawStake) ?? 0;
-
-        final tip = SavedTip(
-          id: match.id,
-          league: match.league,
-          homeTeam: match.homeTeam,
-          awayTeam: match.awayTeam,
-          tipLabel: match.tipLabel,
-          aiScore: match.aiScore,
-          odds: match.odds,
-          stake: stake,
-          savedAt: DateTime.now(),
-        );
-
-        await const SavedTipsService().saveTip(tip);
-
-        if (!context.mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Tipp gespeichert'),
-          ),
-        );
-      },
-      icon: const Icon(Icons.bookmark_add_rounded),
-      label: const Text('Tipp speichern'),
-      style: FilledButton.styleFrom(
-        backgroundColor: AppTheme.blue,
-        foregroundColor: Colors.white,
-        minimumSize: const Size.fromHeight(52),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
-        textStyle: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w900,
-        ),
       ),
     );
   }

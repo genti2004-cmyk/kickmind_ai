@@ -1,109 +1,57 @@
-import '../../predictions/domain/prediction_engine.dart';
-import '../domain/football_match.dart';
+import 'package:kickmind_ai/features/matches/domain/football_match.dart';
+import 'package:kickmind_ai/features/predictions/domain/prediction_engine.dart';
+
+import 'package:kickmind_ai/features/predictions/domain/prediction_engine.dart';
+import 'package:kickmind_ai/features/team_stats/data/mock_team_stats_repository.dart';
 
 class MockMatchesRepository {
-  const MockMatchesRepository();
+  final PredictionEngine _engine = const PredictionEngine();
+  final MockTeamStatsRepository _statsRepo = const MockTeamStatsRepository();
 
-  List<FootballMatch> getTodayMatches() {
+   List<FootballMatch> getTodayMatches() {
     final now = DateTime.now();
 
     return [
-      _buildMatch(
+      _engine.buildMatch(
         id: 'match_001',
         league: 'Premier League',
-        homeTeam: 'Manchester City',
-        awayTeam: 'Arsenal',
+        home: 'Manchester City',
+        away: 'Arsenal',
         kickoff: DateTime(now.year, now.month, now.day, 18, 30),
         tipType: TipType.homeWin,
-        tipLabel: 'Heimsieg',
         odds: 1.72,
         homeFormScore: 88,
         awayFormScore: 74,
         goalsScore: 81,
       ),
-      _buildMatch(
+      _engine.buildMatch(
         id: 'match_002',
         league: 'Bundesliga',
-        homeTeam: 'Bayern München',
-        awayTeam: 'Dortmund',
+        home: 'Bayern München',
+        away: 'Dortmund',
         kickoff: DateTime(now.year, now.month, now.day, 20, 30),
         tipType: TipType.over25,
-        tipLabel: 'Über 2.5 Tore',
         odds: 1.64,
         homeFormScore: 82,
         awayFormScore: 76,
         goalsScore: 91,
       ),
+      _engine.buildMatch(
+        id: 'match_003',
+        league: 'La Liga',
+        home: 'Real Madrid',
+        away: 'Barcelona',
+        kickoff: DateTime(now.year, now.month, now.day, 21, 00),
+        tipType: TipType.btts,
+        odds: 1.82,
+        homeFormScore: 84,
+        awayFormScore: 83,
+        goalsScore: 86,
+      ),
     ];
   }
 
   List<FootballMatch> getTopTips() {
-    return getTodayMatches()
-        .where((match) => match.isStrongTip)
-        .toList()
-      ..sort((a, b) => b.aiScore.compareTo(a.aiScore));
+    return _engine.rankTopTips(getTodayMatches(), limit: 5);
   }
-
-  FootballMatch _buildMatch({
-    required String id,
-    required String league,
-    required String homeTeam,
-    required String awayTeam,
-    required DateTime kickoff,
-    required TipType tipType,
-    required String tipLabel,
-    required double odds,
-    required int homeFormScore,
-    required int awayFormScore,
-    required int goalsScore,
-  }) {
-    const engine = PredictionEngine();
-
-    final aiScore = engine.calculateAiScore(
-      homeFormScore: homeFormScore,
-      awayFormScore: awayFormScore,
-      goalsScore: goalsScore,
-      odds: odds,
-      tipType: tipType,
-    );
-
-    final riskLevel = engine.calculateRisk(
-      aiScore: aiScore,
-      odds: odds,
-    );
-
-    final reason = engine.buildReason(
-      tipType: tipType,
-      homeFormScore: homeFormScore,
-      awayFormScore: awayFormScore,
-      goalsScore: goalsScore,
-      aiScore: aiScore,
-    );
-
-    return FootballMatch(
-      id: id,
-      season: DateTime.now().year,
-      league: league,
-      homeTeam: homeTeam,
-      awayTeam: awayTeam,
-      kickoff: kickoff,
-      kickoffLabel: _buildKickoffLabel(kickoff),
-      tipType: tipType,
-      tipLabel: tipLabel,
-      aiScore: aiScore,
-      riskLevel: riskLevel,
-      odds: odds,
-      homeFormScore: homeFormScore,
-      awayFormScore: awayFormScore,
-      goalsScore: goalsScore,
-      shortReason: reason,
-    );
-  }
-  String _buildKickoffLabel(DateTime kickoff) {
-    final time =
-        '${kickoff.hour.toString().padLeft(2, '0')}:${kickoff.minute.toString().padLeft(2, '0')}';
-
-    return 'Demo • $time';
-  }
-
 }
