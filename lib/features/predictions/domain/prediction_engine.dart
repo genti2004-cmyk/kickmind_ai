@@ -1,54 +1,99 @@
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
+import 'package:kickmind_ai/features/predictions/domain/prediction_breakdown.dart';
 import 'package:kickmind_ai/features/predictions/domain/pro_prediction_input.dart';
 
+/// Finale PredictionEngine für KickMind AI.
+///
+/// Ziele:
+/// - kompatibel mit deinem bestehenden FootballMatch-Modell
+/// - keine neuen RiskLevel-Enums
+/// - Tipp-Labels: 1, X, 2, 1X, X2, 12, Über 2.5, Unter 2.5, BTTS
+/// - transparenter PredictionBreakdown für UI/Detail-Screen
+/// - alte Methoden wie buildMatch(), rankTopTips(), smartScore() bleiben erhalten
 class PredictionEngine {
   const PredictionEngine();
 
+  /// Baut ein fertig angereichertes Match aus ProPredictionInput.
   FootballMatch buildProMatch(ProPredictionInput input) {
+    final breakdown = buildBreakdown(input);
     final match = input.match;
 
-    final formScore = _weighted(
-      input.homeStats.overallFormScore,
-      input.awayStats.overallFormScore,
-      0.55,
+    return match.copyWith(
+      tipType: breakdown.tipType,
+      tipLabel: breakdown.tipLabel,
+      aiScore: breakdown.aiScore,
+      riskLevel: breakdown.riskLevel,
+      odds: breakdown.estimatedOdds,
+      homeFormScore: input.homeStats.overallFormScore,
+      awayFormScore: input.awayStats.overallFormScore,
+      goalsScore: breakdown.goalsTrendScore,
+      shortReason: breakdown.reason,
+    );
+  }
+
+  /// Transparenter AI-Breakdown für Detail-Screen, MatchCard und Top-Tipps.
+  PredictionBreakdown buildBreakdown(ProPredictionInput input) {
+    final formScore = _formScore(input);
+    final homeAwayScore = input.homeAdvantageScore.clamp(1, 99);
+    final goalsTrendScore = input.goalsTrendScore.clamp(1, 99);
+    final headToHeadScore = input.headToHeadScore.clamp(1, 99);
+    final tableScore = input.tableAdvantageScore.clamp(1, 99);
+
+    final aiScore = _buildAiScore(
+      formScore: formScore,
+      homeAwayScore: homeAwayScore,
+      goalsTrendScore: goalsTrendScore,
+      headToHeadScore: headToHeadScore,
+      tableScore: tableScore,
     );
 
-    final homePower = input.homeAdvantageScore;
-    final goalsTrend = input.goalsTrendScore;
-    final tablePower = input.tableAdvantageScore;
-    final h2hPower = input.headToHeadScore;
-
-    final aiScore = ((formScore * 0.30) +
-        (homePower * 0.25) +
-        (goalsTrend * 0.20) +
-        (tablePower * 0.15) +
-        (h2hPower * 0.10))
-        .round()
-        .clamp(1, 99);
-
-    final tipLabel = _proTipLabel(
+    final tipLabel = _bestProTipLabel(
       input: input,
       aiScore: aiScore,
-      goalsTrend: goalsTrend,
+      formScore: formScore,
+      goalsTrendScore: goalsTrendScore,
+      headToHeadScore: headToHeadScore,
+      tableScore: tableScore,
     );
 
     final tipType = _mapLabelToTipType(tipLabel);
-    final odds = estimateOdds(tipType);
-    final risk = calculateRisk(aiScore: aiScore, odds: odds);
-
-    return match.copyWith(
-      tipType: tipType,
+    final odds = estimateOddsForLabel(tipLabel);
+    final risk = calculateRisk(
+      aiScore: aiScore,
+      odds: odds,
       tipLabel: tipLabel,
+    );
+    final confidence = buildConfidence(
       aiScore: aiScore,
       riskLevel: risk,
-      odds: odds,
-      homeFormScore: input.homeStats.overallFormScore,
-      awayFormScore: input.awayStats.overallFormScore,
-      goalsScore: goalsTrend,
-      shortReason: buildProReason(
+      tipLabel: tipLabel,
+      formScore: formScore,
+      goalsTrendScore: goalsTrendScore,
+    );
+
+    return PredictionBreakdown(
+      formScore: formScore,
+      homeAwayScore: homeAwayScore,
+      goalsTrendScore: goalsTrendScore,
+      headToHeadScore: headToHeadScore,
+      tableScore: tableScore,
+      aiScore: aiScore,
+      confidence: confidence,
+      riskLevel: risk,
+      tipLabel: tipLabel,
+      tipType: tipType,
+      estimatedOdds: odds,
+      reason: _buildReason(
+        input: input,
         tipLabel: tipLabel,
         aiScore: aiScore,
-        input: input,
+        confidence: confidence,
+        riskLevel: risk,
+        formScore: formScore,
+        homeAwayScore: homeAwayScore,
+        goalsTrendScore: goalsTrendScore,
+        headToHeadScore: headToHeadScore,
+        tableScore: tableScore,
       ),
     );
   }
@@ -58,60 +103,11 @@ class PredictionEngine {
     required int aiScore,
     required ProPredictionInput input,
   }) {
-    return '$tipLabel: AI $aiScore. '
-        'Form ${input.homeStats.overallFormScore}:${input.awayStats.overallFormScore}, '
-        'Heimvorteil ${input.homeAdvantageScore}, '
-        'Tore-Trend ${input.goalsTrendScore}, '
-        'Tabelle ${input.tableAdvantageScore}, '
-        'Direkte Duelle ${input.headToHeadScore}.';
+    final breakdown = buildBreakdown(input);
+    return breakdown.reason;
   }
 
-  String _proTipLabel({
-    required ProPredictionInput input,
-    required int aiScore,
-    required int goalsTrend,
-  }) {
-    final formDiff = input.formDifference;
-    final tableScore = input.tableAdvantageScore;
-    final h2h = input.headToHeadScore;
-
-    if (goalsTrend >= 76) return 'Über 2.5';
-    if (goalsTrend <= 38) return 'Unter 2.5';
-
-    if (formDiff >= 16 && tableScore >= 58) return '1';
-    if (formDiff <= -16 && tableScore <= 42) return '2';
-
-    if (formDiff >= 7 && h2h >= 50) return '1X';
-    if (formDiff <= -7 && h2h <= 50) return 'X2';
-
-    if (formDiff.abs() <= 6) return 'X';
-
-    return goalsTrend >= 62 ? 'BTTS' : '12';
-  }
-
-  TipType _mapLabelToTipType(String label) {
-    switch (label) {
-      case '1':
-      case '1X':
-        return TipType.homeWin;
-      case '2':
-      case 'X2':
-        return TipType.awayWin;
-      case 'X':
-        return TipType.draw;
-      case 'Über 2.5':
-        return TipType.over25;
-      case 'Unter 2.5':
-        return TipType.under25;
-      case 'BTTS':
-        return TipType.btts;
-      case '12':
-        return TipType.homeWin;
-      default:
-        return TipType.homeWin;
-    }
-  }
-
+  /// Fallback/MVP-Erzeugung, falls nur einfache Matchdaten vorhanden sind.
   FootballMatch buildMatch({
     required String id,
     int? fixtureId,
@@ -140,7 +136,8 @@ class PredictionEngine {
           goalsScore: resolvedGoalsScore,
         );
 
-    final resolvedOdds = odds ?? estimateOdds(resolvedTipType);
+    final label = tipLabel(resolvedTipType);
+    final resolvedOdds = odds ?? estimateOddsForLabel(label);
 
     final aiScore = calculateAiScore(
       homeFormScore: resolvedHomeForm,
@@ -150,7 +147,11 @@ class PredictionEngine {
       tipType: resolvedTipType,
     );
 
-    final risk = calculateRisk(aiScore: aiScore, odds: resolvedOdds);
+    final risk = calculateRisk(
+      aiScore: aiScore,
+      odds: resolvedOdds,
+      tipLabel: label,
+    );
 
     return FootballMatch(
       id: id,
@@ -162,7 +163,7 @@ class PredictionEngine {
       kickoff: kickoff,
       kickoffLabel: _formatKickoff(kickoff),
       tipType: resolvedTipType,
-      tipLabel: tipLabel(resolvedTipType),
+      tipLabel: label,
       aiScore: aiScore,
       riskLevel: risk,
       odds: resolvedOdds,
@@ -185,8 +186,15 @@ class PredictionEngine {
       }) {
     final sorted = [...matches]
       ..sort((a, b) {
+        final confidenceA = _derivedConfidenceFromMatch(a);
+        final confidenceB = _derivedConfidenceFromMatch(b);
+
+        final confidenceCompare = confidenceB.compareTo(confidenceA);
+        if (confidenceCompare != 0) return confidenceCompare;
+
         final scoreCompare = b.aiScore.compareTo(a.aiScore);
         if (scoreCompare != 0) return scoreCompare;
+
         return a.odds.compareTo(b.odds);
       });
 
@@ -205,7 +213,8 @@ class PredictionEngine {
     final formScore = switch (tipType) {
       TipType.homeWin => homeFormScore,
       TipType.awayWin => awayFormScore,
-      TipType.draw => (100 - (homeFormScore - awayFormScore).abs()).clamp(40, 95),
+      TipType.draw =>
+          (100 - (homeFormScore - awayFormScore).abs()).clamp(40, 95),
       TipType.over25 => goalsScore,
       TipType.under25 => 100 - goalsScore,
       TipType.btts => ((goalsScore + homeFormScore + awayFormScore) / 3).round(),
@@ -221,10 +230,39 @@ class PredictionEngine {
   String calculateRisk({
     required int aiScore,
     required double odds,
+    String? tipLabel,
   }) {
-    if (aiScore >= 82 && odds <= 1.90) return 'Niedrig';
-    if (aiScore >= 70 && odds <= 2.40) return 'Mittel';
+    final label = tipLabel ?? '';
+    final saferMarket = label == '1X' || label == 'X2' || label == '12';
+
+    if (aiScore >= 82 && (odds <= 1.90 || saferMarket)) return 'Niedrig';
+    if (aiScore >= 70 && odds <= 2.45) return 'Mittel';
     return 'Hoch';
+  }
+
+  int buildConfidence({
+    required int aiScore,
+    required String riskLevel,
+    required String tipLabel,
+    int? formScore,
+    int? goalsTrendScore,
+  }) {
+    var confidence = aiScore;
+
+    if (tipLabel == '1X' || tipLabel == 'X2' || tipLabel == '12') {
+      confidence += 5;
+    }
+    if (tipLabel == 'Über 2.5' || tipLabel == 'Unter 2.5' || tipLabel == 'BTTS') {
+      confidence += 2;
+    }
+
+    if (riskLevel == 'Niedrig') confidence += 3;
+    if (riskLevel == 'Hoch') confidence -= 8;
+
+    if (formScore != null && formScore >= 80) confidence += 2;
+    if (goalsTrendScore != null && goalsTrendScore >= 80) confidence += 2;
+
+    return confidence.clamp(1, 99);
   }
 
   String buildReason({
@@ -235,7 +273,24 @@ class PredictionEngine {
     required int aiScore,
   }) {
     final tip = tipLabel(tipType);
-    return '$tip: AI $aiScore. Form $homeFormScore:$awayFormScore, Tore-Score $goalsScore.';
+    final diff = homeFormScore - awayFormScore;
+
+    if (tipType == TipType.homeWin) {
+      return '$tip empfohlen. Heimteam mit Formvorteil $homeFormScore:$awayFormScore. AI $aiScore, Tore-Trend $goalsScore.';
+    }
+    if (tipType == TipType.awayWin) {
+      return '$tip empfohlen. Auswärtsteam mit Formvorteil $awayFormScore:$homeFormScore. AI $aiScore, Tore-Trend $goalsScore.';
+    }
+    if (tipType == TipType.draw) {
+      return '$tip empfohlen. Teams liegen eng beieinander (Differenz ${diff.abs()}). AI $aiScore.';
+    }
+    if (tipType == TipType.over25) {
+      return '$tip empfohlen. Hoher Tore-Trend $goalsScore/100. AI $aiScore.';
+    }
+    if (tipType == TipType.under25) {
+      return '$tip empfohlen. Niedriger Tore-Trend $goalsScore/100. AI $aiScore.';
+    }
+    return '$tip empfohlen. Beide Teams mit offensivem Potenzial. AI $aiScore, Tore-Trend $goalsScore.';
   }
 
   String tipLabel(TipType type) {
@@ -255,20 +310,112 @@ class PredictionEngine {
     }
   }
 
-  double estimateOdds(TipType type) {
-    switch (type) {
-      case TipType.homeWin:
+  double estimateOdds(TipType type) => estimateOddsForLabel(tipLabel(type));
+
+  double estimateOddsForLabel(String label) {
+    switch (label) {
+      case '1':
         return 1.78;
-      case TipType.draw:
-        return 3.20;
-      case TipType.awayWin:
-        return 2.15;
-      case TipType.over25:
+      case 'X':
+        return 3.25;
+      case '2':
+        return 2.18;
+      case '1X':
+        return 1.35;
+      case 'X2':
+        return 1.48;
+      case '12':
+        return 1.28;
+      case 'Über 2.5':
         return 1.85;
-      case TipType.under25:
+      case 'Unter 2.5':
         return 1.95;
-      case TipType.btts:
+      case 'BTTS':
         return 1.82;
+      default:
+        return 1.80;
+    }
+  }
+
+  int _buildAiScore({
+    required int formScore,
+    required int homeAwayScore,
+    required int goalsTrendScore,
+    required int headToHeadScore,
+    required int tableScore,
+  }) {
+    return ((formScore * 0.32) +
+        (homeAwayScore * 0.20) +
+        (goalsTrendScore * 0.20) +
+        (headToHeadScore * 0.13) +
+        (tableScore * 0.15))
+        .round()
+        .clamp(1, 99);
+  }
+
+  int _formScore(ProPredictionInput input) {
+    final home = input.homeStats.overallFormScore;
+    final away = input.awayStats.overallFormScore;
+    final diff = home - away;
+
+    if (diff.abs() <= 5) return 68;
+
+    final stronger = diff > 0 ? home : away;
+    final weaker = diff > 0 ? away : home;
+
+    return ((stronger * 0.72) + ((100 - weaker) * 0.28)).round().clamp(1, 99);
+  }
+
+  String _bestProTipLabel({
+    required ProPredictionInput input,
+    required int aiScore,
+    required int formScore,
+    required int goalsTrendScore,
+    required int headToHeadScore,
+    required int tableScore,
+  }) {
+    final formDiff = input.formDifference;
+    final homeStrong = formDiff >= 15 && tableScore >= 56;
+    final awayStrong = formDiff <= -15 && tableScore <= 44;
+    final closeMatch = formDiff.abs() <= 6;
+
+    // Zuerst klare Tor-Märkte, wenn der Trend stark ist.
+    if (goalsTrendScore >= 80 && aiScore >= 68) return 'Über 2.5';
+    if (goalsTrendScore <= 38 && aiScore >= 64) return 'Unter 2.5';
+
+    // Danach klare 1/X/2 Tipps.
+    if (homeStrong && aiScore >= 75) return '1';
+    if (awayStrong && aiScore >= 75) return '2';
+
+    // Sicherere Märkte, wenn der Favorit nicht klar genug ist.
+    if (formDiff >= 7 && headToHeadScore >= 48) return '1X';
+    if (formDiff <= -7 && headToHeadScore <= 52) return 'X2';
+
+    if (closeMatch && aiScore >= 62) return 'X';
+    if (goalsTrendScore >= 62) return 'BTTS';
+
+    return '12';
+  }
+
+  TipType _mapLabelToTipType(String label) {
+    switch (label) {
+      case '1':
+      case '1X':
+      case '12':
+        return TipType.homeWin;
+      case 'X':
+        return TipType.draw;
+      case '2':
+      case 'X2':
+        return TipType.awayWin;
+      case 'Über 2.5':
+        return TipType.over25;
+      case 'Unter 2.5':
+        return TipType.under25;
+      case 'BTTS':
+        return TipType.btts;
+      default:
+        return TipType.homeWin;
     }
   }
 
@@ -287,13 +434,44 @@ class PredictionEngine {
     return TipType.btts;
   }
 
+  String _buildReason({
+    required ProPredictionInput input,
+    required String tipLabel,
+    required int aiScore,
+    required int confidence,
+    required String riskLevel,
+    required int formScore,
+    required int homeAwayScore,
+    required int goalsTrendScore,
+    required int headToHeadScore,
+    required int tableScore,
+  }) {
+    final formText =
+        '${input.homeStats.overallFormScore}:${input.awayStats.overallFormScore}';
+    final tableText = input.homeStanding == null || input.awayStanding == null
+        ? 'Tabelle neutral'
+        : 'Tabelle ${input.homeStanding!.position}:${input.awayStanding!.position}';
+
+    return '$tipLabel empfohlen. AI $aiScore, Confidence $confidence%, Risiko $riskLevel. '
+        'Form $formText, Heim/Auswärts $homeAwayScore, Tore-Trend $goalsTrendScore, '
+        'H2H $headToHeadScore, $tableText.';
+  }
+
+  int _derivedConfidenceFromMatch(FootballMatch match) {
+    return buildConfidence(
+      aiScore: match.aiScore,
+      riskLevel: match.riskLevel,
+      tipLabel: match.tipLabel,
+      formScore: match.homeFormScore > match.awayFormScore
+          ? match.homeFormScore
+          : match.awayFormScore,
+      goalsTrendScore: match.goalsScore,
+    );
+  }
+
   int _stableScore(String seed, {required int min, required int max}) {
     final hash = seed.codeUnits.fold<int>(0, (sum, c) => sum + c);
     return min + (hash % (max - min + 1));
-  }
-
-  int _weighted(int home, int away, double homeWeight) {
-    return ((home * homeWeight) + (away * (1 - homeWeight))).round();
   }
 
   String _formatKickoff(DateTime date) {

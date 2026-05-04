@@ -1,61 +1,49 @@
 import 'package:flutter/material.dart';
-import 'package:kickmind_ai/features/home/presentation/home_screen.dart';
-import 'package:kickmind_ai/features/saved_tips/presentation/saved_tips_screen.dart';
-import 'package:kickmind_ai/features/settings/presentation/app_info_screen.dart';
-
+import 'package:kickmind_ai/features/matches/presentation/kickmind_matches_screen.dart';
 import 'package:kickmind_ai/features/top_tips/presentation/top_tips_screen.dart';
-// Falls du einen TopTipsScreen hast, import aktivieren:
-// import 'package:kickmind_ai/features/tips/presentation/top_tips_screen.dart';
+import 'package:kickmind_ai/features/analysis/presentation/analysis_screen.dart';
+import 'package:kickmind_ai/features/saved_tips/presentation/saved_tips_screen.dart';
+import 'package:kickmind_ai/features/odds/presentation/live_odds_screen.dart';
+import 'package:kickmind_ai/features/value_bets/presentation/value_bets_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
 
   @override
-  State<MainNavigationScreen> createState() =>
-      _MainNavigationScreenState();
+  State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
-  int _currentIndex = 0;
+  int _tabIndex = 0;
 
-  late final List<Widget> _pages = [
-    const HomeScreen(),
-    const TopTipsScreen(),
-    const SavedTipsScreen(),
-    const AppInfoScreen(),
-  ];
+  final pages = const [
+    KickMindMatchesScreen(),
+    TopTipsScreen(),
+    AnalysisScreen(),
+    SavedTipsScreen(),
+    LiveOddsScreen(),      // ➕ NEU
+    ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _pages[_currentIndex],
+      body: pages[_tabIndex],
 
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
+        selectedIndex: _tabIndex,
+        onDestinationSelected: (value) {
           setState(() {
-            _currentIndex = index;
+            _tabIndex = value;
           });
         },
         destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home),
-            label: 'Heute',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.local_fire_department),
-            label: 'Top Tipps',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.bookmark),
-            label: 'Meine Tipps',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.info),
-            label: 'Info',
-          ),
+          NavigationDestination(icon: Icon(Icons.sports_soccer_rounded), label: 'Heute'),
+          NavigationDestination(icon: Icon(Icons.auto_graph_rounded), label: 'Top Tipps'),
+          NavigationDestination(icon: Icon(Icons.analytics_rounded), label: 'Analyse'),
+          NavigationDestination(icon: Icon(Icons.bookmark_rounded), label: 'Meine Tipps'),
+          NavigationDestination(icon: Icon(Icons.casino_rounded), label: 'Quoten'),     // ➕
         ],
-      ),
+      )
     );
   }
 }

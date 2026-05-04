@@ -24,9 +24,9 @@ class KickMindTheme {
         primary: primary,
         secondary: accent,
         surface: surface,
+        background: background,
       ),
       scaffoldBackgroundColor: background,
-      fontFamily: 'Roboto',
     );
 
     return base.copyWith(
@@ -44,23 +44,18 @@ class KickMindTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: surface,
         indicatorColor: primary.withOpacity(0.12),
-        labelTextStyle: WidgetStateProperty.all(
-          const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
+        labelTextStyle: MaterialStateProperty.all(
+          const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
         ),
-        iconTheme: WidgetStateProperty.resolveWith((states) {
-          final selected = states.contains(WidgetState.selected);
+        iconTheme: MaterialStateProperty.resolveWith((states) {
+          final selected = states.contains(MaterialState.selected);
           return IconThemeData(color: selected ? primary : textMuted);
         }),
       ),
       cardTheme: CardThemeData(
         elevation: 0,
         color: surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         margin: EdgeInsets.zero,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
@@ -69,55 +64,24 @@ class KickMindTheme {
           foregroundColor: Colors.white,
           elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-          textStyle: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: primary,
-          textStyle: const TextStyle(fontWeight: FontWeight.w800),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w900),
         ),
       ),
       chipTheme: base.chipTheme.copyWith(
         backgroundColor: Colors.white,
         selectedColor: primary.withOpacity(0.12),
-        labelStyle: const TextStyle(
-          fontWeight: FontWeight.w700,
-          color: textDark,
-        ),
+        labelStyle: const TextStyle(fontWeight: FontWeight.w800, color: textDark),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(999),
           side: BorderSide(color: Colors.black.withOpacity(0.06)),
         ),
       ),
-      dividerTheme: DividerThemeData(
-        color: Colors.black.withOpacity(0.06),
-        thickness: 1,
-      ),
       textTheme: base.textTheme.copyWith(
-        titleLarge: const TextStyle(
-          color: textDark,
-          fontSize: 22,
-          fontWeight: FontWeight.w900,
-        ),
-        titleMedium: const TextStyle(
-          color: textDark,
-          fontSize: 17,
-          fontWeight: FontWeight.w900,
-        ),
-        bodyMedium: const TextStyle(
-          color: textDark,
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-        ),
-        bodySmall: const TextStyle(
-          color: textMuted,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
+        titleLarge: const TextStyle(color: textDark, fontSize: 22, fontWeight: FontWeight.w900),
+        titleMedium: const TextStyle(color: textDark, fontSize: 17, fontWeight: FontWeight.w900),
+        bodyMedium: const TextStyle(color: textDark, fontSize: 14, fontWeight: FontWeight.w600),
+        bodySmall: const TextStyle(color: textMuted, fontSize: 12, fontWeight: FontWeight.w700),
       ),
     );
   }

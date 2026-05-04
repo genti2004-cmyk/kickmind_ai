@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/core/theme/kickmind_theme.dart';
 import 'package:kickmind_ai/features/filters/presentation/filter_screen.dart';
-import 'package:kickmind_ai/features/matches/data/api/football_api_service.dart';
+import 'package:kickmind_ai/features/matches/data/repositories/match_repository_impl.dart';
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
+import 'package:kickmind_ai/features/matches/domain/match_date_range.dart';
+import 'package:kickmind_ai/features/matches/presentation/widgets/match_card.dart';
 import 'package:kickmind_ai/features/matches/presentation/match_detail_screen.dart';
 import 'package:kickmind_ai/features/predictions/domain/prediction_engine.dart';
-
-enum _DateRangeMode { today, tomorrow, threeDays, week }
-enum _ViewMode { list, topTips, analysis }
 
 class KickMindMatchesScreen extends StatefulWidget {
   const KickMindMatchesScreen({super.key});
@@ -16,310 +16,401 @@ class KickMindMatchesScreen extends StatefulWidget {
 }
 
 class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
-  final FootballApiService _api = FootballApiService();
+  final MatchRepositoryImpl _repo = MatchRepositoryImpl();
   final PredictionEngine _engine = const PredictionEngine();
 
-  late Future<List<FootballMatch>> _future;
-  _DateRangeMode _rangeMode = _DateRangeMode.today;
-  _ViewMode _viewMode = _ViewMode.list;
+  MatchDateRange _range = MatchDateRange.today;
   FilterResult? _activeFilter;
+  late Future<List<FootballMatch>> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _loadMatches();
+    _future = _repo.getMatches(range: _range);
   }
 
-  Future<List<FootballMatch>> _loadMatches({bool forceRefresh = false}) {
-    switch (_rangeMode) {
-      case _DateRangeMode.today:
-        return _api.fetchTodayFixtures(forceRefresh: forceRefresh);
-      case _DateRangeMode.tomorrow:
-        return _api.fetchTomorrowFixtures(forceRefresh: forceRefresh);
-      case _DateRangeMode.threeDays:
-        return _api.fetchNext3DaysFixtures(forceRefresh: forceRefresh);
-      case _DateRangeMode.week:
-        return _api.fetchWeekFixtures(forceRefresh: forceRefresh);
-    }
-  }
-
-  void _reload({bool forceRefresh = false}) {
+  void _reload() {
     setState(() {
-      _future = _loadMatches(forceRefresh: forceRefresh);
+      _future = _repo.getMatches(range: _range);
     });
   }
 
-  void _changeRange(_DateRangeMode mode) {
-    if (_rangeMode == mode) return;
+  void _changeRange(MatchDateRange range) {
+    if (_range == range) return;
     setState(() {
-      _rangeMode = mode;
-      _future = _loadMatches();
+      _range = range;
+      _future = _repo.getMatches(range: _range);
     });
   }
 
   Future<void> _openFilter(List<FootballMatch> matches) async {
     final leagues = matches.map((m) => m.league).where((e) => e.trim().isNotEmpty).toSet().toList()..sort();
 
-    final result = await Navigator.of(context).push<FilterResult>(
+    final result = await Navigator.push<FilterResult>(
+      context,
       MaterialPageRoute(
         builder: (_) => FilterScreen(
-          leagues: leagues,
+          availableLeagues: leagues,
           initialFilter: _activeFilter,
         ),
       ),
     );
 
-    if (result == null || !mounted) return;
+    if (!mounted) return;
 
-    setState(() {
-      _activeFilter = result;
-      _viewMode = _ViewMode.list;
-    });
+    if (result != null) {
+      setState(() => _activeFilter = result);
+    }
+  }
+
+  void _resetFilter() {
+    setState(() => _activeFilter = null);
   }
 
   List<FootballMatch> _applyFilter(List<FootballMatch> matches) {
     final filter = _activeFilter;
-    if (filter == null || !filter.isActive) return matches;
+    if (filter == null) return matches;
 
     return matches.where((m) {
-      if (filter.league != null && m.league != filter.league) return false;
-      if (filter.risk != null && m.riskLevel != filter.risk) return false;
-      if (m.aiScore < filter.minScore) return false;
+      if (filter.league != null && filter.league!.isNotEmpty && m.league != filter.league) {
+        return false;
+      }
+
+      if (filter.risk != null && filter.risk!.isNotEmpty && m.riskLevel != filter.risk) {
+        return false;
+      }
+
+      if (m.aiScore < filter.minScore) {
+        return false;
+      }
+
       return true;
     }).toList();
-  }
-
-  String get _rangeTitle {
-    switch (_rangeMode) {
-      case _DateRangeMode.today:
-        return 'Heute';
-      case _DateRangeMode.tomorrow:
-        return 'Morgen';
-      case _DateRangeMode.threeDays:
-        return 'Nächste 3 Tage';
-      case _DateRangeMode.week:
-        return 'Diese Woche';
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
+      backgroundColor: KickMindTheme.background,
       appBar: AppBar(
         title: const Text('KickMind AI'),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: const Color(0xFF071626),
-        foregroundColor: Colors.white,
         actions: [
           IconButton(
             tooltip: 'Aktualisieren',
-            onPressed: () => _reload(forceRefresh: true),
+            onPressed: _reload,
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
-      body: FutureBuilder<List<FootballMatch>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      body: SafeArea(
+        child: FutureBuilder<List<FootballMatch>>(
+          future: _future,
+          builder: (context, snapshot) {
+            final loading = snapshot.connectionState == ConnectionState.waiting;
+            final rawMatches = snapshot.data ?? <FootballMatch>[];
+            final matches = _applyFilter(rawMatches);
+            final topTips = _engine.rankTopTips(matches, limit: 5);
+            final topPick = topTips.isNotEmpty ? topTips.first : null;
+            final valuePick = _bestValuePick(matches);
+            final strongCount = matches.where((m) => m.aiScore >= 80 && m.riskLevel.toLowerCase() != 'hoch').length;
+            final avgAi = matches.isEmpty ? 0 : (matches.fold<int>(0, (sum, m) => sum + m.aiScore) / matches.length).round();
 
-          if (snapshot.hasError) {
-            return _ErrorView(
-              message: snapshot.error.toString(),
-              onRetry: () => _reload(forceRefresh: true),
-            );
-          }
+            if (loading) {
+              return const _LoadingState();
+            }
 
-          final allMatches = snapshot.data ?? const <FootballMatch>[];
-          final filteredMatches = _applyFilter(allMatches);
-          final topTips = _engine.rankTopTips(filteredMatches, limit: 5);
+            return RefreshIndicator(
+              onRefresh: () async => _reload(),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                children: [
+                  _StartHero(
+                    rangeLabel: _range.label,
+                    matchCount: matches.length,
+                    avgAi: avgAi,
+                    strongCount: strongCount,
+                    onFilterTap: () => _openFilter(rawMatches),
+                  ),
+                  const SizedBox(height: 14),
 
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-            children: [
-              _ModeBar(
-                rangeMode: _rangeMode,
-                viewMode: _viewMode,
-                filterActive: _activeFilter?.isActive ?? false,
-                onRangeChanged: _changeRange,
-                onViewChanged: (mode) => setState(() => _viewMode = mode),
-                onFilterTap: () => _openFilter(allMatches),
-              ),
-              const SizedBox(height: 18),
-              _HeroHeader(
-                title: _rangeTitle,
-                subtitle: '${filteredMatches.length} von ${allMatches.length} echten Spielen geladen',
-                icon: Icons.sports_soccer_rounded,
-              ),
-              const SizedBox(height: 18),
-              if (_activeFilter?.isActive ?? false) ...[
-                _ActiveFilterBanner(
-                  filter: _activeFilter!,
-                  onClear: () => setState(() => _activeFilter = null),
-                ),
-                const SizedBox(height: 16),
-              ],
-              if (allMatches.isEmpty)
-                _EmptyCard(
-                  title: 'Keine Spiele gefunden',
-                  text: 'Für diesen Zeitraum hat die API keine Fußballspiele geliefert. Es werden bewusst keine Dummy-Spiele angezeigt.',
-                  onRetry: () => _reload(forceRefresh: true),
-                )
-              else if (filteredMatches.isEmpty)
-                _EmptyCard(
-                  title: 'Keine Spiele nach Filter',
-                  text: 'Lockere den Filter für Liga, Risiko oder AI-Score.',
-                  onRetry: () => setState(() => _activeFilter = null),
-                )
-              else ...[
-                  if (_viewMode == _ViewMode.list) ...[
-                    if (topTips.isNotEmpty) ...[
-                      const _SectionTitle('🔥 Top Tipps heute'),
-                      const SizedBox(height: 10),
-                      ...topTips.take(3).map((m) => _TopMiniCard(match: m)),
-                      const SizedBox(height: 18),
-                    ],
-                    const _SectionTitle('Alle Spiele'),
+                  _RangeSelector(
+                    selected: _range,
+                    onChanged: _changeRange,
+                  ),
+                  const SizedBox(height: 12),
+
+                  if (_activeFilter != null)
+                    _ActiveFilterBanner(
+                      filter: _activeFilter!,
+                      onReset: _resetFilter,
+                    ),
+
+                  if (topPick != null) ...[
+                    _SectionHeader(
+                      title: '🔥 Heute Top Pick',
+                      subtitle: 'Der stärkste Tipp aus deiner aktuellen Auswahl',
+                      actionLabel: 'Details',
+                      onActionTap: () => _openDetail(topPick),
+                    ),
                     const SizedBox(height: 10),
-                    ...filteredMatches.map((m) => _MatchCard(match: m)),
-                  ] else if (_viewMode == _ViewMode.topTips) ...[
-                    const _SectionTitle('Top Tipps nach AI Score'),
-                    const SizedBox(height: 10),
-                    ...topTips.asMap().entries.map((entry) => _TopTipCard(rank: entry.key + 1, match: entry.value)),
-                  ] else ...[
-                    _AnalysisPanel(matches: filteredMatches, topTips: topTips),
+                    _HighlightCard(
+                      match: topPick,
+                      icon: Icons.local_fire_department_rounded,
+                      title: 'Top Pick',
+                      accentColor: KickMindTheme.scoreColor(topPick.aiScore),
+                      badgeText: '${topPick.tipLabel} · AI ${topPick.aiScore}%',
+                      footerText: topPick.shortReason,
+                      onTap: () => _openDetail(topPick),
+                    ),
+                    const SizedBox(height: 18),
                   ],
+
+                  if (valuePick != null) ...[
+                    _SectionHeader(
+                      title: '💰 Beste Value Bet',
+                      subtitle: 'AI-Wahrscheinlichkeit gegen implizite Quote',
+                      actionLabel: 'Öffnen',
+                      onActionTap: () => _openDetail(valuePick),
+                    ),
+                    const SizedBox(height: 10),
+                    _HighlightCard(
+                      match: valuePick,
+                      icon: Icons.attach_money_rounded,
+                      title: 'Value Chance',
+                      accentColor: KickMindTheme.success,
+                      badgeText: _valueLabel(valuePick),
+                      footerText: 'AI ${(valuePick.aiScore).toString()}% vs. Quote ${valuePick.odds.toStringAsFixed(2)}',
+                      onTap: () => _openDetail(valuePick),
+                    ),
+                    const SizedBox(height: 18),
+                  ],
+
+                  _QuickStatsGrid(
+                    matchCount: matches.length,
+                    avgAi: avgAi,
+                    strongCount: strongCount,
+                    valueCount: matches.where(_isValueCandidate).length,
+                  ),
+                  const SizedBox(height: 18),
+
+                  if (topTips.isNotEmpty) ...[
+                    const _SectionHeader(
+                      title: 'Top Tipps heute',
+                      subtitle: 'Kompakte Auswahl mit AI, Risiko und Quote',
+                    ),
+                    const SizedBox(height: 10),
+                    ...topTips.take(3).map(
+                          (m) => _TopTipMiniCard(
+                        match: m,
+                        valueCandidate: _isValueCandidate(m),
+                        onTap: () => _openDetail(m),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                  ],
+
+                  _SectionHeader(
+                    title: _range.label,
+                    subtitle: '${matches.length} Spiele gefunden',
+                    actionLabel: _activeFilter == null ? 'Filter' : 'Reset',
+                    onActionTap: _activeFilter == null ? () => _openFilter(rawMatches) : _resetFilter,
+                  ),
+                  const SizedBox(height: 10),
+
+                  if (matches.isEmpty)
+                    const _EmptyState()
+                  else
+                    ...matches.map(
+                          (match) => MatchCard(
+                        match: match,
+                        onTap: () => _openDetail(match),
+                        trailing: _isValueCandidate(match)
+                            ? const _MiniValueBadge()
+                            : null,
+                      ),
+                    ),
                 ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openDetail(FootballMatch match) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => MatchDetailScreen(match: match)),
+    );
+  }
+
+  FootballMatch? _bestValuePick(List<FootballMatch> matches) {
+    final candidates = matches.where(_isValueCandidate).toList()
+      ..sort((a, b) => _valueEdge(b).compareTo(_valueEdge(a)));
+    return candidates.isEmpty ? null : candidates.first;
+  }
+
+  bool _isValueCandidate(FootballMatch match) {
+    if (match.odds <= 1.01) return false;
+    final aiProbability = match.aiScore / 100.0;
+    final impliedProbability = 1.0 / match.odds;
+    return aiProbability > impliedProbability && match.aiScore >= 70;
+  }
+
+  double _valueEdge(FootballMatch match) {
+    if (match.odds <= 1.01) return 0;
+    final aiProbability = match.aiScore / 100.0;
+    final impliedProbability = 1.0 / match.odds;
+    return (aiProbability - impliedProbability) * 100;
+  }
+
+  String _valueLabel(FootballMatch match) {
+    final edge = _valueEdge(match);
+    return 'Edge +${edge.toStringAsFixed(1)}%';
+  }
+}
+
+class _StartHero extends StatelessWidget {
+  final String rangeLabel;
+  final int matchCount;
+  final int avgAi;
+  final int strongCount;
+  final VoidCallback onFilterTap;
+
+  const _StartHero({
+    required this.rangeLabel,
+    required this.matchCount,
+    required this.avgAi,
+    required this.strongCount,
+    required this.onFilterTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0D47A1), Color(0xFF1565C0), Color(0xFF00A676)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: KickMindTheme.primary.withOpacity(0.22),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.psychology_alt_rounded, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'KickMind AI Analyse',
+                      style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$rangeLabel · $matchCount Spiele · Ø AI $avgAi%',
+                      style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton.filledTonal(
+                onPressed: onFilterTap,
+                icon: const Icon(Icons.filter_alt_rounded),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.16),
+                  foregroundColor: Colors.white,
+                ),
+              ),
             ],
-          );
-        },
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(child: _HeroMetric(label: 'Spiele', value: '$matchCount')),
+              const SizedBox(width: 10),
+              Expanded(child: _HeroMetric(label: 'Ø AI', value: '$avgAi%')),
+              const SizedBox(width: 10),
+              Expanded(child: _HeroMetric(label: 'Stark', value: '$strongCount')),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-class _ModeBar extends StatelessWidget {
-  final _DateRangeMode rangeMode;
-  final _ViewMode viewMode;
-  final bool filterActive;
-  final ValueChanged<_DateRangeMode> onRangeChanged;
-  final ValueChanged<_ViewMode> onViewChanged;
-  final VoidCallback onFilterTap;
+class _HeroMetric extends StatelessWidget {
+  final String label;
+  final String value;
 
-  const _ModeBar({
-    required this.rangeMode,
-    required this.viewMode,
-    required this.filterActive,
-    required this.onRangeChanged,
-    required this.onViewChanged,
-    required this.onFilterTap,
-  });
+  const _HeroMetric({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.14)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, fontSize: 12)),
+          const SizedBox(height: 4),
+          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18)),
+        ],
+      ),
+    );
+  }
+}
+
+class _RangeSelector extends StatelessWidget {
+  final MatchDateRange selected;
+  final ValueChanged<MatchDateRange> onChanged;
+
+  const _RangeSelector({required this.selected, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
-        children: [
-          _PillButton(label: 'Heute', icon: Icons.sports_soccer_rounded, selected: rangeMode == _DateRangeMode.today, onTap: () => onRangeChanged(_DateRangeMode.today)),
-          _PillButton(label: 'Morgen', icon: Icons.today_rounded, selected: rangeMode == _DateRangeMode.tomorrow, onTap: () => onRangeChanged(_DateRangeMode.tomorrow)),
-          _PillButton(label: '3 Tage', icon: Icons.date_range_rounded, selected: rangeMode == _DateRangeMode.threeDays, onTap: () => onRangeChanged(_DateRangeMode.threeDays)),
-          _PillButton(label: 'Woche', icon: Icons.calendar_month_rounded, selected: rangeMode == _DateRangeMode.week, onTap: () => onRangeChanged(_DateRangeMode.week)),
-          _PillButton(label: 'Top Tipps', icon: Icons.local_fire_department_rounded, selected: viewMode == _ViewMode.topTips, onTap: () => onViewChanged(_ViewMode.topTips)),
-          _PillButton(label: 'Analyse', icon: Icons.analytics_rounded, selected: viewMode == _ViewMode.analysis, onTap: () => onViewChanged(_ViewMode.analysis)),
-          _PillButton(label: filterActive ? 'Filter aktiv' : 'Filter', icon: Icons.filter_alt_rounded, selected: filterActive, onTap: onFilterTap),
-        ],
-      ),
-    );
-  }
-}
-
-class _PillButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _PillButton({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: selected ? const Color(0xFF1565C0) : Colors.white,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: selected ? const Color(0xFF1565C0) : const Color(0xFFD8E1EE)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 19, color: selected ? Colors.white : const Color(0xFF1565C0)),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected ? Colors.white : const Color(0xFF1565C0),
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroHeader extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-
-  const _HeroHeader({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [Color(0xFF1565C0), Color(0xFF1E9AF0)]),
-        borderRadius: BorderRadius.circular(26),
-        boxShadow: [BoxShadow(color: const Color(0xFF1565C0).withOpacity(0.20), blurRadius: 22, offset: const Offset(0, 12))],
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.white, size: 44),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900)),
-                const SizedBox(height: 6),
-                Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.w700)),
-              ],
+        children: MatchDateRange.values.map((range) {
+          final active = range == selected;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              selected: active,
+              label: Text(range.label),
+              onSelected: (_) => onChanged(range),
             ),
-          ),
-        ],
+          );
+        }).toList(),
       ),
     );
   }
@@ -327,278 +418,255 @@ class _HeroHeader extends StatelessWidget {
 
 class _ActiveFilterBanner extends StatelessWidget {
   final FilterResult filter;
-  final VoidCallback onClear;
+  final VoidCallback onReset;
 
-  const _ActiveFilterBanner({
-    required this.filter,
-    required this.onClear,
-  });
+  const _ActiveFilterBanner({required this.filter, required this.onReset});
 
   @override
   Widget build(BuildContext context) {
-    final parts = <String>[];
-    if (filter.league != null) parts.add(filter.league!);
-    if (filter.risk != null) parts.add('Risiko ${filter.risk}');
-    if (filter.minScore > 50) parts.add('AI ab ${filter.minScore}');
+    final parts = <String>[
+      if (filter.league != null) 'Liga: ${filter.league}',
+      if (filter.risk != null) 'Risiko: ${filter.risk}',
+      'AI ≥ ${filter.minScore}',
+    ];
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF7ED),
+        color: KickMindTheme.warning.withOpacity(0.10),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.25)),
+        border: Border.all(color: KickMindTheme.warning.withOpacity(0.22)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.filter_alt_rounded, color: Color(0xFFF59E0B)),
+          const Icon(Icons.filter_alt_rounded, color: KickMindTheme.warning),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Filter: ${parts.join(' · ')}',
-              style: const TextStyle(color: Color(0xFF92400E), fontWeight: FontWeight.w800),
+              'Filter aktiv: ${parts.join(' • ')}',
+              style: const TextStyle(fontWeight: FontWeight.w800),
             ),
           ),
-          TextButton(onPressed: onClear, child: const Text('Löschen')),
+          TextButton(onPressed: onReset, child: const Text('Reset')),
         ],
       ),
     );
   }
 }
 
-class _TopMiniCard extends StatelessWidget {
-  final FootballMatch match;
+class _QuickStatsGrid extends StatelessWidget {
+  final int matchCount;
+  final int avgAi;
+  final int strongCount;
+  final int valueCount;
 
-  const _TopMiniCard({required this.match});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _scoreColor(match.aiScore);
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MatchDetailScreen(match: match))),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: color.withOpacity(0.25)),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, 6))],
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                match.teamsLabel,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Color(0xFF172033), fontWeight: FontWeight.w900, fontSize: 15),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              '${match.tipLabel} · AI ${match.aiScore}',
-              style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 15),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MatchCard extends StatelessWidget {
-  final FootballMatch match;
-
-  const _MatchCard({required this.match});
-
-  @override
-  Widget build(BuildContext context) {
-    final scoreColor = _scoreColor(match.aiScore);
-    final riskColor = _riskColor(match.riskLevel);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 18, offset: const Offset(0, 10))],
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MatchDetailScreen(match: match))),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      match.league,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Color(0xFF1565C0), fontWeight: FontWeight.w900, fontSize: 16),
-                    ),
-                  ),
-                  Text(match.kickoffLabel, style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w800)),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                match.teamsLabel,
-                style: const TextStyle(color: Color(0xFF172033), fontSize: 18, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _Badge(text: match.tipLabel, color: const Color(0xFF1565C0)),
-                  _Badge(text: 'AI ${match.aiScore}', color: scoreColor),
-                  _Badge(text: '${match.riskEmoji} ${match.riskLevel}', color: riskColor),
-                  _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: const Color(0xFF4F46E5)),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                match.shortReason,
-                style: const TextStyle(color: Color(0xFF4B5563), fontWeight: FontWeight.w700, height: 1.35),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TopTipCard extends StatelessWidget {
-  final int rank;
-  final FootballMatch match;
-
-  const _TopTipCard({required this.rank, required this.match});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _scoreColor(match.aiScore);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: color.withOpacity(0.22)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 16, offset: const Offset(0, 8))],
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MatchDetailScreen(match: match))),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: color.withOpacity(0.12),
-                foregroundColor: color,
-                child: Text('$rank', style: const TextStyle(fontWeight: FontWeight.w900)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(match.teamsLabel, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF172033), fontWeight: FontWeight.w900, fontSize: 16)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _Badge(text: match.tipLabel, color: const Color(0xFF1565C0)),
-                        _Badge(text: 'AI ${match.aiScore}', color: color),
-                        _Badge(text: match.riskLevel, color: _riskColor(match.riskLevel)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AnalysisPanel extends StatelessWidget {
-  final List<FootballMatch> matches;
-  final List<FootballMatch> topTips;
-
-  const _AnalysisPanel({
-    required this.matches,
-    required this.topTips,
+  const _QuickStatsGrid({
+    required this.matchCount,
+    required this.avgAi,
+    required this.strongCount,
+    required this.valueCount,
   });
 
   @override
   Widget build(BuildContext context) {
-    final avgAi = matches.isEmpty ? 0 : matches.map((m) => m.aiScore).fold<int>(0, (a, b) => a + b) / matches.length;
-    final strong = matches.where((m) => m.isStrongTip).length;
-    final lowRisk = matches.where((m) => m.riskLevel == 'Niedrig').length;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Row(
-          children: [
-            Expanded(child: _MetricCard(label: 'Spiele', value: '${matches.length}')),
-            const SizedBox(width: 10),
-            Expanded(child: _MetricCard(label: 'Ø AI', value: avgAi.toStringAsFixed(0))),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: _MetricCard(label: 'Starke Tipps', value: '$strong')),
-            const SizedBox(width: 10),
-            Expanded(child: _MetricCard(label: 'Niedrig Risiko', value: '$lowRisk')),
-          ],
-        ),
-        const SizedBox(height: 18),
-        const _SectionTitle('Top 3 Analyse'),
-        const SizedBox(height: 10),
-        ...topTips.take(3).map((m) => _MatchCard(match: m)),
+        Expanded(child: _StatCard(label: 'Spiele', value: '$matchCount', icon: Icons.sports_soccer_rounded, color: KickMindTheme.primary)),
+        const SizedBox(width: 10),
+        Expanded(child: _StatCard(label: 'Ø AI', value: '$avgAi%', icon: Icons.auto_graph_rounded, color: KickMindTheme.accent)),
+        const SizedBox(width: 10),
+        Expanded(child: _StatCard(label: 'Value', value: '$valueCount', icon: Icons.attach_money_rounded, color: KickMindTheme.success)),
       ],
     );
   }
 }
 
-class _MetricCard extends StatelessWidget {
+class _StatCard extends StatelessWidget {
   final String label;
   final String value;
+  final IconData icon;
+  final Color color;
 
-  const _MetricCard({required this.label, required this.value});
+  const _StatCard({required this.label, required this.value, required this.icon, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: KickMindTheme.surface,
         borderRadius: BorderRadius.circular(18),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 14, offset: const Offset(0, 8))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 14, offset: const Offset(0, 8))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 6),
-          Text(value, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Color(0xFF1565C0))),
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 8),
+          Text(value, style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(color: KickMindTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w800)),
         ],
       ),
     );
+  }
+}
+
+class _HighlightCard extends StatelessWidget {
+  final FootballMatch match;
+  final IconData icon;
+  final String title;
+  final Color accentColor;
+  final String badgeText;
+  final String footerText;
+  final VoidCallback onTap;
+
+  const _HighlightCard({
+    required this.match,
+    required this.icon,
+    required this.title,
+    required this.accentColor,
+    required this.badgeText,
+    required this.footerText,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(22),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: KickMindTheme.surface,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: accentColor.withOpacity(0.18)),
+          boxShadow: [BoxShadow(color: accentColor.withOpacity(0.10), blurRadius: 18, offset: const Offset(0, 9))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(color: accentColor.withOpacity(0.12), borderRadius: BorderRadius.circular(15)),
+                  child: Icon(icon, color: accentColor),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: TextStyle(color: accentColor, fontWeight: FontWeight.w900, fontSize: 13)),
+                      const SizedBox(height: 2),
+                      Text(match.teamsLabel, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _Badge(text: badgeText, color: accentColor),
+                _Badge(text: '${match.riskEmoji} ${match.riskLevel}', color: KickMindTheme.riskColor(match.riskLevel)),
+                _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: Colors.indigo),
+              ],
+            ),
+            if (footerText.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(footerText, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: KickMindTheme.textMuted, height: 1.35, fontWeight: FontWeight.w700)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TopTipMiniCard extends StatelessWidget {
+  final FootballMatch match;
+  final bool valueCandidate;
+  final VoidCallback onTap;
+
+  const _TopTipMiniCard({required this.match, required this.valueCandidate, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = KickMindTheme.scoreColor(match.aiScore);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.20)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${valueCandidate ? '💰 ' : ''}${match.teamsLabel}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text('${match.tipLabel} • AI ${match.aiScore}', style: TextStyle(color: color, fontWeight: FontWeight.w900)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String? actionLabel;
+  final VoidCallback? onActionTap;
+
+  const _SectionHeader({required this.title, required this.subtitle, this.actionLabel, this.onActionTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 2),
+              Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+        ),
+        if (actionLabel != null && onActionTap != null)
+          TextButton(onPressed: onActionTap, child: Text(actionLabel!)),
+      ],
+    );
+  }
+}
+
+class _MiniValueBadge extends StatelessWidget {
+  const _MiniValueBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _Badge(text: '💰 Value', color: KickMindTheme.success);
   }
 }
 
@@ -606,106 +674,75 @@ class _Badge extends StatelessWidget {
   final String text;
   final Color color;
 
-  const _Badge({
-    required this.text,
-    required this.color,
-  });
+  const _Badge({required this.text, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 12),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(999)),
+      child: Text(text, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w900)),
     );
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  final String text;
-
-  const _SectionTitle(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(color: Color(0xFF172033), fontSize: 20, fontWeight: FontWeight.w900),
-    );
-  }
-}
-
-class _EmptyCard extends StatelessWidget {
-  final String title;
-  final String text;
-  final VoidCallback onRetry;
-
-  const _EmptyCard({
-    required this.title,
-    required this.text,
-    required this.onRetry,
-  });
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(color: KickMindTheme.surface, borderRadius: BorderRadius.circular(18)),
+      child: const Column(
         children: [
-          Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
-          const SizedBox(height: 8),
-          Text(text, style: const TextStyle(color: Colors.black54, height: 1.35, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 12),
-          ElevatedButton(onPressed: onRetry, child: const Text('Erneut versuchen')),
+          Icon(Icons.sports_soccer_rounded, size: 42),
+          SizedBox(height: 12),
+          Text('Keine Spiele gefunden', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+          SizedBox(height: 6),
+          Text('Ändere den Zeitraum oder setze den Filter zurück.', textAlign: TextAlign.center),
         ],
       ),
     );
   }
 }
 
-class _ErrorView extends StatelessWidget {
-  final String message;
-  final VoidCallback onRetry;
-
-  const _ErrorView({required this.message, required this.onRetry});
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.warning_amber_rounded, size: 48, color: Color(0xFF1565C0)),
-            const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 12),
-            ElevatedButton(onPressed: onRetry, child: const Text('Erneut laden')),
-          ],
-        ),
-      ),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+      children: const [
+        _SkeletonBox(height: 150),
+        SizedBox(height: 14),
+        _SkeletonBox(height: 44),
+        SizedBox(height: 14),
+        _SkeletonBox(height: 118),
+        SizedBox(height: 12),
+        _SkeletonBox(height: 118),
+        SizedBox(height: 12),
+        _SkeletonBox(height: 118),
+      ],
     );
   }
 }
 
-Color _scoreColor(int score) {
-  if (score >= 82) return const Color(0xFF16A34A);
-  if (score >= 70) return const Color(0xFFF59E0B);
-  return const Color(0xFFDC2626);
-}
+class _SkeletonBox extends StatelessWidget {
+  final double height;
 
-Color _riskColor(String risk) {
-  final value = risk.toLowerCase();
-  if (value.contains('niedrig') || value.contains('low')) return const Color(0xFF16A34A);
-  if (value.contains('mittel') || value.contains('medium')) return const Color(0xFFF59E0B);
-  return const Color(0xFFDC2626);
+  const _SkeletonBox({required this.height});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 14, offset: const Offset(0, 8))],
+      ),
+    );
+  }
 }

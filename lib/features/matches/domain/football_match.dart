@@ -26,6 +26,9 @@ class FootballMatch {
   final int goalsScore;
   final String shortReason;
 
+  final String? tip;
+
+
   const FootballMatch({
     required this.id,
     this.fixtureId,
@@ -44,6 +47,7 @@ class FootballMatch {
     required this.awayFormScore,
     required this.goalsScore,
     required this.shortReason,
+    this.tip,
   });
 
   Map<String, dynamic> toJson() {

@@ -5,97 +5,50 @@ import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/predictions/domain/prediction_engine.dart';
 
 class FootballApiService {
-  FootballApiService({PredictionEngine? predictionEngine})
-      : _predictionEngine = predictionEngine ?? const PredictionEngine();
+  FootballApiService({
+    PredictionEngine? predictionEngine,
+    http.Client? client,
+  })  : _predictionEngine = predictionEngine ?? const PredictionEngine(),
+        _client = client ?? http.Client();
 
   final PredictionEngine _predictionEngine;
+  final http.Client _client;
 
-  static final Map<String, List<FootballMatch>> _cache = <String, List<FootballMatch>>{};
-  static final Map<String, DateTime> _cacheTime = <String, DateTime>{};
-  static final Map<String, Future<List<FootballMatch>>> _inFlight = <String, Future<List<FootballMatch>>>{};
-
+  static final Map<String, List<FootballMatch>> _rangeCache = <String, List<FootballMatch>>{};
+  static final Map<String, DateTime> _rangeCacheTime = <String, DateTime>{};
   static const Duration _cacheDuration = Duration(minutes: 30);
-  static const String _apiKey = '123';
 
   Future<List<FootballMatch>> fetchTodayFixtures({bool forceRefresh = false}) {
-    final now = DateTime.now();
-    return fetchFixturesRange(
-      startDate: DateTime(now.year, now.month, now.day),
+    return fetchFixturesForRange(
+      start: DateTime.now(),
       days: 1,
       forceRefresh: forceRefresh,
     );
   }
 
-  Future<List<FootballMatch>> fetchTomorrowFixtures({bool forceRefresh = false}) {
-    final now = DateTime.now().add(const Duration(days: 1));
-    return fetchFixturesRange(
-      startDate: DateTime(now.year, now.month, now.day),
-      days: 1,
-      forceRefresh: forceRefresh,
-    );
-  }
-
-  Future<List<FootballMatch>> fetchNext3DaysFixtures({bool forceRefresh = false}) {
-    final now = DateTime.now();
-    return fetchFixturesRange(
-      startDate: DateTime(now.year, now.month, now.day),
-      days: 3,
-      forceRefresh: forceRefresh,
-    );
-  }
-
-  Future<List<FootballMatch>> fetchWeekFixtures({bool forceRefresh = false}) {
-    final now = DateTime.now();
-    return fetchFixturesRange(
-      startDate: DateTime(now.year, now.month, now.day),
-      days: 7,
-      forceRefresh: forceRefresh,
-    );
-  }
-
-  Future<List<FootballMatch>> fetchFixturesRange({
-    required DateTime startDate,
+  Future<List<FootballMatch>> fetchFixturesForRange({
+    required DateTime start,
     required int days,
     bool forceRefresh = false,
   }) async {
-    final safeDays = days.clamp(1, 14);
-    final start = DateTime(startDate.year, startDate.month, startDate.day);
-    final cacheKey = '${_formatDate(start)}_$safeDays';
+    final normalizedStart = DateTime(start.year, start.month, start.day);
+    final safeDays = days < 1 ? 1 : days;
+    final key = '${_formatDate(normalizedStart)}_$safeDays';
     final now = DateTime.now();
 
-    if (!forceRefresh && _cache.containsKey(cacheKey) && _cacheTime.containsKey(cacheKey)) {
-      if (now.difference(_cacheTime[cacheKey]!) < _cacheDuration) {
-        return _cache[cacheKey]!;
+    if (!forceRefresh && _rangeCache.containsKey(key)) {
+      final cacheTime = _rangeCacheTime[key];
+      if (cacheTime != null && now.difference(cacheTime) < _cacheDuration) {
+        return _rangeCache[key]!;
       }
     }
 
-    if (!forceRefresh && _inFlight.containsKey(cacheKey)) {
-      return _inFlight[cacheKey]!;
-    }
-
-    final request = _loadRange(start: start, days: safeDays);
-    _inFlight[cacheKey] = request;
-
-    try {
-      final data = await request;
-      _cache[cacheKey] = data;
-      _cacheTime[cacheKey] = DateTime.now();
-      return data;
-    } finally {
-      _inFlight.remove(cacheKey);
-    }
-  }
-
-  Future<List<FootballMatch>> _loadRange({
-    required DateTime start,
-    required int days,
-  }) async {
     final all = <FootballMatch>[];
 
-    for (var i = 0; i < days; i++) {
-      final date = start.add(Duration(days: i));
-      final matches = await _fetchDate(date);
-      all.addAll(matches);
+    for (var offset = 0; offset < safeDays; offset++) {
+      final day = normalizedStart.add(Duration(days: offset));
+      final dayMatches = await _fetchDayFromSportsDb(day);
+      all.addAll(dayMatches);
     }
 
     final unique = <String, FootballMatch>{};
@@ -106,17 +59,20 @@ class FootballApiService {
     final result = unique.values.toList()
       ..sort((a, b) => a.kickoff.compareTo(b.kickoff));
 
-    return result.take(120).toList();
+    _rangeCache[key] = result;
+    _rangeCacheTime[key] = DateTime.now();
+
+    return result;
   }
 
-  Future<List<FootballMatch>> _fetchDate(DateTime date) async {
+  Future<List<FootballMatch>> _fetchDayFromSportsDb(DateTime day) async {
     try {
-      final formattedDate = _formatDate(date);
+      final date = _formatDate(day);
       final uri = Uri.parse(
-        'https://www.thesportsdb.com/api/v1/json/$_apiKey/eventsday.php?d=$formattedDate&s=Soccer',
+        'https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=$date&s=Soccer',
       );
 
-      final response = await http.get(uri).timeout(const Duration(seconds: 12));
+      final response = await _client.get(uri).timeout(const Duration(seconds: 12));
       if (response.statusCode != 200) return <FootballMatch>[];
 
       final decoded = jsonDecode(response.body);
@@ -135,24 +91,14 @@ class FootballApiService {
         if (home == null || home.isEmpty || away == null || away.isEmpty) continue;
 
         final league = raw['strLeague']?.toString().trim();
-        final rawDate = raw['dateEventLocal']?.toString().trim().isNotEmpty == true
-            ? raw['dateEventLocal'].toString().trim()
-            : (raw['dateEvent']?.toString().trim().isNotEmpty == true
-            ? raw['dateEvent'].toString().trim()
-            : formattedDate);
-        final rawTime = raw['strTimeLocal']?.toString().trim().isNotEmpty == true
-            ? raw['strTimeLocal'].toString().trim()
-            : (raw['strTime']?.toString().trim().isNotEmpty == true
-            ? raw['strTime'].toString().trim()
-            : '12:00:00');
-
-        final kickoff = _parseKickoff(rawDate, rawTime, date).toLocal();
+        final rawDate = raw['dateEventLocal']?.toString() ?? raw['dateEvent']?.toString() ?? date;
+        final rawTime = raw['strTimeLocal']?.toString() ?? raw['strTime']?.toString() ?? '12:00:00';
+        final kickoff = _parseKickoff(rawDate, rawTime, day).toLocal();
 
         result.add(
           _predictionEngine.buildMatch(
             id: raw['idEvent']?.toString() ?? '${home}_${away}_${kickoff.millisecondsSinceEpoch}',
             fixtureId: int.tryParse(raw['idEvent']?.toString() ?? ''),
-            season: kickoff.year,
             league: league == null || league.isEmpty ? 'Soccer' : league,
             home: home,
             away: away,
@@ -162,13 +108,13 @@ class FootballApiService {
       }
 
       result.sort((a, b) => a.kickoff.compareTo(b.kickoff));
-      return result;
+      return result.take(80).toList();
     } catch (_) {
       return <FootballMatch>[];
     }
   }
 
-  DateTime _parseKickoff(String rawDate, String rawTime, DateTime fallbackDate) {
+  DateTime _parseKickoff(String rawDate, String rawTime, DateTime fallback) {
     final cleanTime = rawTime.replaceAll('Z', '').trim();
     final candidates = <String>[
       '${rawDate}T$cleanTime',
@@ -180,8 +126,7 @@ class FootballApiService {
       final parsed = DateTime.tryParse(candidate);
       if (parsed != null) return parsed;
     }
-
-    return DateTime(fallbackDate.year, fallbackDate.month, fallbackDate.day, 12);
+    return fallback;
   }
 
   String _formatDate(DateTime d) {
