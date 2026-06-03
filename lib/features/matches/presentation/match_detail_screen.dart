@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/core/scoring/top_tip_score_service.dart';
 import 'package:kickmind_ai/core/theme/kickmind_theme.dart';
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/predictions/domain/prediction_breakdown.dart';
@@ -29,7 +30,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     const MockTeamStatsRepository().buildInput(match),
   );
 
-  late final _TopTipScore topScore = _TopTipScore.fromMatch(match);
+  late final TopTipScore topScore = TopTipScore.fromMatch(match);
   late final _ValueInfo valueInfo = _ValueInfo.fromMatch(match);
 
   @override
@@ -204,7 +205,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
 class _Hero extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
-  final _TopTipScore topScore;
+  final TopTipScore topScore;
   final _ValueInfo valueInfo;
 
   const _Hero({
@@ -294,7 +295,7 @@ class _Hero extends StatelessWidget {
 
 class _TopTipsScoreCard extends StatelessWidget {
   final FootballMatch match;
-  final _TopTipScore topScore;
+  final TopTipScore topScore;
 
   const _TopTipsScoreCard({required this.match, required this.topScore});
 
@@ -413,7 +414,7 @@ class _ScoreTile extends StatelessWidget {
 class _Recommendation extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
-  final _TopTipScore topScore;
+  final TopTipScore topScore;
   final _ValueInfo valueInfo;
 
   const _Recommendation({
@@ -585,7 +586,7 @@ class _BreakdownBar extends StatelessWidget {
 class _StatsGrid extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
-  final _TopTipScore topScore;
+  final TopTipScore topScore;
 
   const _StatsGrid({
     required this.match,
@@ -862,77 +863,6 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _TopTipScore {
-  final double finalScore;
-  final double valueEdge;
-  final double confidence;
-
-  const _TopTipScore({
-    required this.finalScore,
-    required this.valueEdge,
-    required this.confidence,
-  });
-
-  factory _TopTipScore.fromMatch(FootballMatch match) {
-    final valueEdge = _valueEdge(match);
-    final riskBonus = _riskBonus(match);
-    final oddsBonus = _oddsBonus(match.odds);
-    final formBoost = _formBoost(match);
-
-    final finalScore = (match.aiScore * 0.62 +
-        valueEdge.clamp(-15.0, 18.0) * 0.95 +
-        riskBonus +
-        oddsBonus +
-        formBoost)
-        .clamp(1.0, 99.0)
-        .toDouble();
-
-    final confidence =
-    (match.aiScore + riskBonus + formBoost + oddsBonus).clamp(1.0, 99.0).toDouble();
-
-    return _TopTipScore(
-      finalScore: finalScore,
-      valueEdge: valueEdge,
-      confidence: confidence,
-    );
-  }
-
-  static double _valueEdge(FootballMatch match) {
-    if (match.odds <= 1.0) return 0.0;
-
-    final aiProbability = (match.aiScore / 100.0).clamp(0.0, 1.0).toDouble();
-    final impliedProbability = (1.0 / match.odds).clamp(0.0, 1.0).toDouble();
-
-    return (aiProbability - impliedProbability) * 100.0;
-  }
-
-  static double _riskBonus(FootballMatch match) {
-    final risk = match.riskLevel.toLowerCase();
-
-    if (risk.contains('niedrig') || risk.contains('low')) return 8.0;
-    if (risk.contains('mittel') || risk.contains('medium')) return 2.0;
-    return -10.0;
-  }
-
-  static double _oddsBonus(double odds) {
-    if (odds >= 1.45 && odds <= 2.05) return 5.0;
-    if (odds > 2.05 && odds <= 2.45) return 1.0;
-    if (odds < 1.25 || odds > 3.10) return -5.0;
-    return 0.0;
-  }
-
-  static double _formBoost(FootballMatch match) {
-    final strongestForm = match.homeFormScore > match.awayFormScore
-        ? match.homeFormScore
-        : match.awayFormScore;
-
-    if (strongestForm >= 84) return 5.0;
-    if (strongestForm >= 76) return 2.5;
-    if (strongestForm < 58) return -4.0;
-    return 0.0;
-  }
-}
-
 class _ValueInfo {
   final bool isValueBet;
   final double aiProbabilityPercent;
@@ -947,24 +877,13 @@ class _ValueInfo {
   });
 
   factory _ValueInfo.fromMatch(FootballMatch match) {
-    if (match.odds <= 1.0) {
-      return const _ValueInfo(
-        isValueBet: false,
-        aiProbabilityPercent: 0,
-        impliedProbabilityPercent: 0,
-        edgePercent: 0,
-      );
-    }
-
-    final aiProbability = (match.aiScore / 100).clamp(0.0, 1.0);
-    final impliedProbability = (1 / match.odds).clamp(0.0, 1.0);
-    final edge = aiProbability - impliedProbability;
+    final info = TopTipScoreService.instance.valueInfo(match);
 
     return _ValueInfo(
-      isValueBet: match.aiScore >= 70 && edge >= 0.045,
-      aiProbabilityPercent: aiProbability * 100,
-      impliedProbabilityPercent: impliedProbability * 100,
-      edgePercent: edge * 100,
+      isValueBet: info.isValueBet,
+      aiProbabilityPercent: info.aiProbabilityPercent,
+      impliedProbabilityPercent: info.impliedProbabilityPercent,
+      edgePercent: info.edgePercent,
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/core/scoring/odds_score_service.dart';
 import 'package:kickmind_ai/features/odds/data/live_odds_service.dart';
 import 'package:kickmind_ai/features/odds/domain/live_odds.dart';
 
@@ -65,7 +66,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
           tipLabel: 'Heimsieg',
           value: item.homeWin,
           margin: h2hMargin,
-          marketType: _MarketType.home,
+          marketType: OddsMarketType.home,
         ),
       );
 
@@ -76,7 +77,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
           tipLabel: 'Unentschieden',
           value: item.draw,
           margin: h2hMargin,
-          marketType: _MarketType.draw,
+          marketType: OddsMarketType.draw,
         ),
       );
 
@@ -87,7 +88,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
           tipLabel: 'Auswärtssieg',
           value: item.awayWin,
           margin: h2hMargin,
-          marketType: _MarketType.away,
+          marketType: OddsMarketType.away,
         ),
       );
 
@@ -101,7 +102,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
             tipLabel: 'Über 2.5 Tore',
             value: item.over25!,
             margin: totalMargin,
-            marketType: _MarketType.over25,
+            marketType: OddsMarketType.over25,
           ),
         );
 
@@ -112,7 +113,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
             tipLabel: 'Unter 2.5 Tore',
             value: item.under25!,
             margin: totalMargin,
-            marketType: _MarketType.under25,
+            marketType: OddsMarketType.under25,
           ),
         );
       }
@@ -125,7 +126,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
             tipLabel: 'Beide Teams treffen',
             value: item.bttsYes!,
             margin: 0.07,
-            marketType: _MarketType.btts,
+            marketType: OddsMarketType.btts,
           ),
         );
       }
@@ -851,14 +852,6 @@ class _Pill extends StatelessWidget {
   }
 }
 
-enum _MarketType {
-  home,
-  draw,
-  away,
-  over25,
-  under25,
-  btts,
-}
 
 class _OddsOpportunity {
   final LiveOdds odds;
@@ -893,85 +886,29 @@ class _OddsOpportunity {
     required String tipLabel,
     required double value,
     required double margin,
-    required _MarketType marketType,
+    required OddsMarketType marketType,
   }) {
-    final implied = value > 1 ? (1 / value) * 100 : 0.0;
-    final oddsQuality = _oddsQuality(value);
-    final marketBias = _marketBias(marketType);
-    final marginPenalty = math.min(10.0, margin * 100 * 0.65);
-    final aiScore = (implied + oddsQuality + marketBias - marginPenalty)
-        .clamp(18.0, 92.0)
-        .toDouble();
-    final valueEdge = aiScore - implied;
-    final riskPenalty = _riskPenalty(value);
-    final finalScore = (aiScore + (valueEdge * 1.25) - riskPenalty)
-        .clamp(0.0, 99.0)
-        .toDouble();
-    final confidence = ((aiScore * 0.72) + (finalScore * 0.28))
-        .clamp(0.0, 99.0)
-        .toDouble();
-
-    final risk = _riskLabel(value);
-    final color = _riskColor(risk);
-    final reason = _reason(
-      value: value,
-      finalScore: finalScore,
-      valueEdge: valueEdge,
-      risk: risk,
+    final score = OddsScoreService.instance.evaluate(
+      oddsValue: value,
       margin: margin,
+      marketType: marketType,
     );
+    final risk = score.riskLevel;
+    final color = _riskColor(risk);
 
     return _OddsOpportunity(
       odds: odds,
       marketLabel: marketLabel,
       tipLabel: tipLabel,
       value: value,
-      aiScore: aiScore,
-      finalScore: finalScore,
-      valueEdge: valueEdge,
-      confidence: confidence,
+      aiScore: score.aiScore,
+      finalScore: score.finalScore,
+      valueEdge: score.valueEdge,
+      confidence: score.confidence,
       riskLevel: risk,
       riskColor: color,
-      reason: reason,
+      reason: score.reason,
     );
-  }
-
-  static double _oddsQuality(double value) {
-    if (value >= 1.55 && value <= 2.25) return 10;
-    if (value > 2.25 && value <= 3.20) return 5;
-    if (value >= 1.30 && value < 1.55) return 3;
-    if (value > 3.20) return -5;
-    return -7;
-  }
-
-  static double _marketBias(_MarketType type) {
-    switch (type) {
-      case _MarketType.home:
-        return 4;
-      case _MarketType.away:
-        return 1;
-      case _MarketType.draw:
-        return -4;
-      case _MarketType.over25:
-        return 3;
-      case _MarketType.under25:
-        return 1;
-      case _MarketType.btts:
-        return 2;
-    }
-  }
-
-  static double _riskPenalty(double value) {
-    if (value <= 1.70) return 3;
-    if (value <= 2.30) return 6;
-    if (value <= 3.10) return 12;
-    return 20;
-  }
-
-  static String _riskLabel(double value) {
-    if (value <= 1.75) return 'Niedrig';
-    if (value <= 2.65) return 'Mittel';
-    return 'Hoch';
   }
 
   static Color _riskColor(String label) {
@@ -980,28 +917,4 @@ class _OddsOpportunity {
     return const Color(0xFFEA580C);
   }
 
-  static String _reason({
-    required double value,
-    required double finalScore,
-    required double valueEdge,
-    required String risk,
-    required double margin,
-  }) {
-    final edgeText = valueEdge >= 0
-        ? 'positiver Value Edge'
-        : 'kein klarer Value Edge';
-    final marginText = margin <= 0.08
-        ? 'faire Markt-Marge'
-        : 'erhöhte Buchmacher-Marge';
-
-    if (finalScore >= 72) {
-      return 'Starker Quoten-Kandidat: $edgeText, $marginText und Risiko $risk bei Quote ${value.toStringAsFixed(2)}.';
-    }
-
-    if (finalScore >= 60) {
-      return 'Beobachten: solide Quote mit brauchbarer Bewertung, aber nicht als Blind-Tipp spielen.';
-    }
-
-    return 'Nur prüfen: Die Quote ist aktuell nicht stark genug für eine klare Top-Tipp-Empfehlung.';
-  }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/core/scoring/top_tip_score_service.dart';
 import 'package:kickmind_ai/core/theme/kickmind_theme.dart';
 import 'package:kickmind_ai/features/matches/data/repositories/match_repository_impl.dart';
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
@@ -14,6 +15,7 @@ class TopTipsScreen extends StatefulWidget {
 
 class _TopTipsScreenState extends State<TopTipsScreen> {
   final MatchRepositoryImpl _repository = MatchRepositoryImpl();
+  final TopTipScoreService _scoreService = TopTipScoreService.instance;
 
   MatchDateRange _range = MatchDateRange.today;
   late Future<List<FootballMatch>> _future;
@@ -178,85 +180,29 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
   }
 
   int _compareByFinalScore(FootballMatch a, FootballMatch b) {
-    final finalCompare = _finalScore(b).compareTo(_finalScore(a));
-    if (finalCompare != 0) return finalCompare;
-
-    final aiCompare = b.aiScore.compareTo(a.aiScore);
-    if (aiCompare != 0) return aiCompare;
-
-    final valueCompare = _valueEdge(b).compareTo(_valueEdge(a));
-    if (valueCompare != 0) return valueCompare;
-
-    return a.odds.compareTo(b.odds);
+    return _scoreService.compareByFinalScore(a, b);
   }
 
   bool _isRecommendedTip(FootballMatch match) {
-    if (match.aiScore < 68) return false;
-    if (_isHighRisk(match) && match.aiScore < 82) return false;
-    return _finalScore(match) >= 67;
+    return _scoreService.isRecommendedTip(match);
   }
 
   bool _isValueBet(FootballMatch match) {
-    return match.aiScore >= 70 && _valueEdge(match) >= 4.5;
-  }
-
-  bool _isHighRisk(FootballMatch match) {
-    final risk = match.riskLevel.toLowerCase();
-    return risk.contains('hoch') || risk.contains('high');
+    return _scoreService.isValueBet(match);
   }
 
   double _finalScore(FootballMatch match) {
-    final ai = match.aiScore.toDouble();
-    final value = _valueEdge(match).clamp(-15.0, 18.0).toDouble();
-    final riskBonus = _riskBonus(match);
-    final oddsBonus = _oddsBonus(match.odds);
-    final formBoost = _formBoost(match);
-
-    return (ai * 0.62 + value * 0.95 + riskBonus + oddsBonus + formBoost)
-        .clamp(1.0, 99.0)
-        .toDouble();
+    return _scoreService.score(match).finalScore;
   }
 
   double _confidence(FootballMatch match) {
-    final risk = _riskBonus(match);
-    final score = match.aiScore + risk + _formBoost(match) + _oddsBonus(match.odds);
-    return score.clamp(1.0, 99.0).toDouble();
+    return _scoreService.score(match).confidence;
   }
 
   double _valueEdge(FootballMatch match) {
-    if (match.odds <= 1.0) return 0.0;
-
-    final aiProbability = (match.aiScore / 100.0).clamp(0.0, 1.0).toDouble();
-    final impliedProbability = (1.0 / match.odds).clamp(0.0, 1.0).toDouble();
-
-    return (aiProbability - impliedProbability) * 100.0;
+    return _scoreService.score(match).valueEdge;
   }
 
-  double _riskBonus(FootballMatch match) {
-    final risk = match.riskLevel.toLowerCase();
-
-    if (risk.contains('niedrig') || risk.contains('low')) return 8.0;
-    if (risk.contains('mittel') || risk.contains('medium')) return 2.0;
-    return -10.0;
-  }
-
-  double _oddsBonus(double odds) {
-    if (odds >= 1.45 && odds <= 2.05) return 5.0;
-    if (odds > 2.05 && odds <= 2.45) return 1.0;
-    if (odds < 1.25 || odds > 3.10) return -5.0;
-    return 0.0;
-  }
-
-  double _formBoost(FootballMatch match) {
-    final strongestForm = match.homeFormScore > match.awayFormScore
-        ? match.homeFormScore
-        : match.awayFormScore;
-
-    if (strongestForm >= 84) return 5.0;
-    if (strongestForm >= 76) return 2.5;
-    if (strongestForm < 58) return -4.0;
-    return 0.0;
-  }
 }
 
 class _TopTipsHeader extends StatelessWidget {

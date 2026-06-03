@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/core/scoring/top_tip_score_service.dart';
 import 'package:kickmind_ai/core/theme/kickmind_theme.dart';
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/matches/presentation/match_detail_screen.dart';
@@ -24,9 +25,9 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
   Future<List<FootballMatch>> _load() async {
     final tips = await _service.loadSavedTips();
     tips.sort((a, b) {
-      final scoreCompare = _TopTipScore.fromMatch(b)
+      final scoreCompare = TopTipScore.fromMatch(b)
           .finalScore
-          .compareTo(_TopTipScore.fromMatch(a).finalScore);
+          .compareTo(TopTipScore.fromMatch(a).finalScore);
       if (scoreCompare != 0) return scoreCompare;
       return b.kickoff.compareTo(a.kickoff);
     });
@@ -162,7 +163,7 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
                 ...tips.map(
                       (match) => _SavedTipCard(
                     match: match,
-                    score: _TopTipScore.fromMatch(match),
+                    score: TopTipScore.fromMatch(match),
                     value: _ValueInfo.fromMatch(match),
                     onTap: () => _openDetail(match),
                     onRemove: () => _removeTip(match),
@@ -323,7 +324,7 @@ class _SummaryTile extends StatelessWidget {
 
 class _SavedTipCard extends StatelessWidget {
   final FootballMatch match;
-  final _TopTipScore score;
+  final TopTipScore score;
   final _ValueInfo value;
   final VoidCallback onTap;
   final VoidCallback onRemove;
@@ -523,7 +524,7 @@ class _SavedTipCard extends StatelessWidget {
 
   static String _reasonText(
       FootballMatch match,
-      _TopTipScore score,
+      TopTipScore score,
       _ValueInfo value,
       ) {
     final valueText = value.isValueBet
@@ -715,7 +716,7 @@ class _SavedTipsStats {
       );
     }
 
-    final scores = tips.map(_TopTipScore.fromMatch).toList();
+    final scores = tips.map(TopTipScore.fromMatch).toList();
     final values = tips.map(_ValueInfo.fromMatch).toList();
 
     return _SavedTipsStats(
@@ -730,55 +731,6 @@ class _SavedTipsStats {
   }
 }
 
-class _TopTipScore {
-  final double finalScore;
-  final double confidence;
-
-  const _TopTipScore({required this.finalScore, required this.confidence});
-
-  factory _TopTipScore.fromMatch(FootballMatch match) {
-    final value = _ValueInfo.fromMatch(match).edgePercent.clamp(-15.0, 18.0);
-    final riskBonus = _riskBonus(match);
-    final oddsBonus = _oddsBonus(match.odds);
-    final formBoost = _formBoost(match);
-
-    final finalScore = (match.aiScore * 0.62 + value * 0.95 + riskBonus + oddsBonus + formBoost)
-        .clamp(1.0, 99.0)
-        .toDouble();
-
-    final confidence = (match.aiScore + riskBonus + formBoost + oddsBonus)
-        .clamp(1.0, 99.0)
-        .toDouble();
-
-    return _TopTipScore(finalScore: finalScore, confidence: confidence);
-  }
-
-  static double _riskBonus(FootballMatch match) {
-    final risk = match.riskLevel.toLowerCase();
-    if (risk.contains('niedrig') || risk.contains('low')) return 8.0;
-    if (risk.contains('mittel') || risk.contains('medium')) return 2.0;
-    return -10.0;
-  }
-
-  static double _oddsBonus(double odds) {
-    if (odds >= 1.45 && odds <= 2.05) return 5.0;
-    if (odds > 2.05 && odds <= 2.45) return 1.0;
-    if (odds < 1.25 || odds > 3.10) return -5.0;
-    return 0.0;
-  }
-
-  static double _formBoost(FootballMatch match) {
-    final strongestForm = match.homeFormScore > match.awayFormScore
-        ? match.homeFormScore
-        : match.awayFormScore;
-
-    if (strongestForm >= 84) return 5.0;
-    if (strongestForm >= 76) return 2.5;
-    if (strongestForm < 58) return -4.0;
-    return 0.0;
-  }
-}
-
 class _ValueInfo {
   final double edgePercent;
 
@@ -787,13 +739,7 @@ class _ValueInfo {
   bool get isValueBet => edgePercent >= 4.5;
 
   factory _ValueInfo.fromMatch(FootballMatch match) {
-    if (match.odds <= 1.0) return const _ValueInfo(edgePercent: 0);
-
-    final aiProbability = (match.aiScore / 100.0).clamp(0.0, 1.0);
-    final impliedProbability = (1.0 / match.odds).clamp(0.0, 1.0);
-
-    return _ValueInfo(
-      edgePercent: (aiProbability - impliedProbability) * 100.0,
-    );
+    final info = TopTipScoreService.instance.valueInfo(match);
+    return _ValueInfo(edgePercent: info.edgePercent);
   }
 }
