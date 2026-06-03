@@ -29,6 +29,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     const MockTeamStatsRepository().buildInput(match),
   );
 
+  late final _TopTipScore topScore = _TopTipScore.fromMatch(match);
   late final _ValueInfo valueInfo = _ValueInfo.fromMatch(match);
 
   @override
@@ -65,15 +66,16 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scoreColor = KickMindTheme.scoreColor(match.aiScore);
     final possibleReturn = _stake * match.odds;
     final profit = possibleReturn - _stake;
 
     return Scaffold(
+      backgroundColor: KickMindTheme.background,
       appBar: AppBar(
-        title: const Text('Match Analyse'),
+        title: const Text('Pro Analyse'),
         actions: [
           IconButton(
+            tooltip: _saved ? 'Tipp entfernen' : 'Tipp speichern',
             onPressed: _loading ? null : _toggleSaved,
             icon: Icon(
               _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
@@ -83,22 +85,27 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 118),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _Hero(
                 match: match,
                 breakdown: breakdown,
-                scoreColor: scoreColor,
+                topScore: topScore,
                 valueInfo: valueInfo,
               ),
+              const SizedBox(height: 16),
+              const _SectionTitle('Top-Tipps Bewertung'),
+              const SizedBox(height: 10),
+              _TopTipsScoreCard(match: match, topScore: topScore),
               const SizedBox(height: 16),
               const _SectionTitle('KI Empfehlung'),
               const SizedBox(height: 10),
               _Recommendation(
                 match: match,
                 breakdown: breakdown,
+                topScore: topScore,
                 valueInfo: valueInfo,
               ),
               const SizedBox(height: 16),
@@ -114,7 +121,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
               const SizedBox(height: 16),
               const _SectionTitle('Analysewerte'),
               const SizedBox(height: 10),
-              _StatsGrid(match: match, breakdown: breakdown),
+              _StatsGrid(match: match, breakdown: breakdown, topScore: topScore),
               const SizedBox(height: 16),
               const _SectionTitle('Formvergleich'),
               const SizedBox(height: 10),
@@ -124,9 +131,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
               const SizedBox(height: 10),
               _PremiumCard(
                 child: Text(
-                  breakdown.reason.trim().isEmpty
-                      ? match.shortReason
-                      : breakdown.reason,
+                  _buildReason(),
                   style: TextStyle(
                     color: Colors.grey.shade800,
                     height: 1.45,
@@ -167,7 +172,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _toggleSaved,
+                  onPressed: _loading ? null : _toggleSaved,
                   icon: Icon(
                     _saved
                         ? Icons.bookmark_remove_rounded
@@ -182,34 +187,50 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       ),
     );
   }
+
+  String _buildReason() {
+    final rawReason = breakdown.reason.trim().isEmpty
+        ? match.shortReason.trim()
+        : breakdown.reason.trim();
+
+    final valueText = valueInfo.isValueBet
+        ? ' Value +${valueInfo.edgePercent.toStringAsFixed(1)}% gegenüber der impliziten Quote.'
+        : '';
+
+    return '${match.tipLabel} empfohlen. Final Score ${topScore.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${topScore.confidence.toStringAsFixed(0)}%, Risiko ${match.riskLevel}.$valueText ${rawReason.isEmpty ? 'Die Bewertung kombiniert Form, Heim/Auswärts-Werte, Tore-Trend, Risiko und Quote.' : rawReason}';
+  }
 }
 
 class _Hero extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
-  final Color scoreColor;
+  final _TopTipScore topScore;
   final _ValueInfo valueInfo;
 
   const _Hero({
     required this.match,
     required this.breakdown,
-    required this.scoreColor,
+    required this.topScore,
     required this.valueInfo,
   });
 
   @override
   Widget build(BuildContext context) {
+    final scoreColor = KickMindTheme.scoreColor(match.aiScore);
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF1565C0), Color(0xFF0D47A1)],
+          colors: [Color(0xFF0B2540), Color(0xFF1565C0)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(26),
         boxShadow: [
           BoxShadow(
             color: KickMindTheme.primary.withOpacity(0.22),
-            blurRadius: 18,
+            blurRadius: 20,
             offset: const Offset(0, 10),
           ),
         ],
@@ -230,8 +251,7 @@ class _Hero extends StatelessWidget {
                   ),
                 ),
               ),
-              if (valueInfo.isValueBet)
-                _WhiteBadge(text: '💰 VALUE'),
+              if (valueInfo.isValueBet) const _WhiteBadge(text: 'VALUE'),
             ],
           ),
           const SizedBox(height: 10),
@@ -252,8 +272,137 @@ class _Hero extends StatelessWidget {
               _WhiteBadge(text: match.kickoffLabel),
               _WhiteBadge(text: 'Tipp ${match.tipLabel}'),
               _WhiteBadge(text: 'AI ${match.aiScore}%'),
-              _WhiteBadge(text: 'Confidence ${breakdown.confidence}%'),
+              _WhiteBadge(text: 'Final ${topScore.finalScore.toStringAsFixed(1)}'),
+              _WhiteBadge(text: 'Confidence ${topScore.confidence.toStringAsFixed(0)}%'),
             ],
+          ),
+          const SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: (topScore.confidence / 100).clamp(0.03, 1.0),
+              minHeight: 10,
+              backgroundColor: Colors.white.withOpacity(0.16),
+              valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TopTipsScoreCard extends StatelessWidget {
+  final FootballMatch match;
+  final _TopTipScore topScore;
+
+  const _TopTipsScoreCard({required this.match, required this.topScore});
+
+  @override
+  Widget build(BuildContext context) {
+    final riskColor = KickMindTheme.riskColor(match.riskLevel);
+
+    return _PremiumCard(
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _ScoreTile(
+                  label: 'Final',
+                  value: topScore.finalScore.toStringAsFixed(1),
+                  icon: Icons.auto_graph_rounded,
+                  color: KickMindTheme.primary,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ScoreTile(
+                  label: 'Value',
+                  value: '${topScore.valueEdge >= 0 ? '+' : ''}${topScore.valueEdge.toStringAsFixed(1)}%',
+                  icon: Icons.trending_up_rounded,
+                  color: topScore.valueEdge >= 0
+                      ? KickMindTheme.success
+                      : KickMindTheme.danger,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _ScoreTile(
+                  label: 'Risiko',
+                  value: match.riskLevel,
+                  icon: Icons.shield_rounded,
+                  color: riskColor,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ScoreTile(
+                  label: 'Quote',
+                  value: match.odds.toStringAsFixed(2),
+                  icon: Icons.percent_rounded,
+                  color: Colors.deepPurple,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ScoreTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  const _ScoreTile({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withOpacity(0.10)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: KickMindTheme.textMuted,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ],
       ),
@@ -264,11 +413,13 @@ class _Hero extends StatelessWidget {
 class _Recommendation extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
+  final _TopTipScore topScore;
   final _ValueInfo valueInfo;
 
   const _Recommendation({
     required this.match,
     required this.breakdown,
+    required this.topScore,
     required this.valueInfo,
   });
 
@@ -279,6 +430,7 @@ class _Recommendation extends StatelessWidget {
 
     return _PremiumCard(
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 76,
@@ -305,9 +457,10 @@ class _Recommendation extends StatelessWidget {
               runSpacing: 8,
               children: [
                 _Badge(text: '${match.riskEmoji} ${match.riskLevel}', color: riskColor),
-                _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: KickMindTheme.primaryDark),
-                _Badge(text: 'Confidence ${breakdown.confidence}%', color: KickMindTheme.accent),
-                _Badge(text: 'Score ${match.aiScore}/100', color: scoreColor),
+                _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: Colors.deepPurple),
+                _Badge(text: 'AI ${match.aiScore}%', color: KickMindTheme.warning),
+                _Badge(text: 'Final ${topScore.finalScore.toStringAsFixed(1)}', color: KickMindTheme.primary),
+                _Badge(text: 'Confidence ${topScore.confidence.toStringAsFixed(0)}%', color: KickMindTheme.accent),
                 if (valueInfo.isValueBet)
                   _Badge(text: 'Value +${valueInfo.edgePercent.toStringAsFixed(1)}%', color: KickMindTheme.success),
               ],
@@ -332,7 +485,7 @@ class _ValueExplanation extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '💰 VALUE BET gefunden',
+            'VALUE BET gefunden',
             style: TextStyle(
               color: KickMindTheme.success,
               fontSize: 16,
@@ -432,17 +585,28 @@ class _BreakdownBar extends StatelessWidget {
 class _StatsGrid extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
+  final _TopTipScore topScore;
 
-  const _StatsGrid({required this.match, required this.breakdown});
+  const _StatsGrid({
+    required this.match,
+    required this.breakdown,
+    required this.topScore,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         Row(children: [
-          Expanded(child: _StatTile(label: 'AI Score', value: '${match.aiScore}', icon: Icons.psychology_rounded)),
+          Expanded(child: _StatTile(label: 'AI Score', value: '${match.aiScore}%', icon: Icons.psychology_rounded)),
           const SizedBox(width: 10),
-          Expanded(child: _StatTile(label: 'Confidence', value: '${breakdown.confidence}%', icon: Icons.verified_rounded)),
+          Expanded(child: _StatTile(label: 'Final Score', value: topScore.finalScore.toStringAsFixed(1), icon: Icons.auto_graph_rounded)),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: _StatTile(label: 'Confidence', value: '${topScore.confidence.toStringAsFixed(0)}%', icon: Icons.verified_rounded)),
+          const SizedBox(width: 10),
+          Expanded(child: _StatTile(label: 'Breakdown', value: '${breakdown.confidence}%', icon: Icons.analytics_rounded)),
         ]),
         const SizedBox(height: 10),
         Row(children: [
@@ -621,7 +785,7 @@ class _PremiumCard extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(color: Colors.black.withOpacity(0.04)),
         boxShadow: [
           BoxShadow(
@@ -670,6 +834,7 @@ class _WhiteBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.16),
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
       ),
       child: Text(
         text,
@@ -694,6 +859,77 @@ class _SectionTitle extends StatelessWidget {
       text,
       style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
     );
+  }
+}
+
+class _TopTipScore {
+  final double finalScore;
+  final double valueEdge;
+  final double confidence;
+
+  const _TopTipScore({
+    required this.finalScore,
+    required this.valueEdge,
+    required this.confidence,
+  });
+
+  factory _TopTipScore.fromMatch(FootballMatch match) {
+    final valueEdge = _valueEdge(match);
+    final riskBonus = _riskBonus(match);
+    final oddsBonus = _oddsBonus(match.odds);
+    final formBoost = _formBoost(match);
+
+    final finalScore = (match.aiScore * 0.62 +
+        valueEdge.clamp(-15.0, 18.0) * 0.95 +
+        riskBonus +
+        oddsBonus +
+        formBoost)
+        .clamp(1.0, 99.0)
+        .toDouble();
+
+    final confidence =
+    (match.aiScore + riskBonus + formBoost + oddsBonus).clamp(1.0, 99.0).toDouble();
+
+    return _TopTipScore(
+      finalScore: finalScore,
+      valueEdge: valueEdge,
+      confidence: confidence,
+    );
+  }
+
+  static double _valueEdge(FootballMatch match) {
+    if (match.odds <= 1.0) return 0.0;
+
+    final aiProbability = (match.aiScore / 100.0).clamp(0.0, 1.0).toDouble();
+    final impliedProbability = (1.0 / match.odds).clamp(0.0, 1.0).toDouble();
+
+    return (aiProbability - impliedProbability) * 100.0;
+  }
+
+  static double _riskBonus(FootballMatch match) {
+    final risk = match.riskLevel.toLowerCase();
+
+    if (risk.contains('niedrig') || risk.contains('low')) return 8.0;
+    if (risk.contains('mittel') || risk.contains('medium')) return 2.0;
+    return -10.0;
+  }
+
+  static double _oddsBonus(double odds) {
+    if (odds >= 1.45 && odds <= 2.05) return 5.0;
+    if (odds > 2.05 && odds <= 2.45) return 1.0;
+    if (odds < 1.25 || odds > 3.10) return -5.0;
+    return 0.0;
+  }
+
+  static double _formBoost(FootballMatch match) {
+    final strongestForm = match.homeFormScore > match.awayFormScore
+        ? match.homeFormScore
+        : match.awayFormScore;
+
+    if (strongestForm >= 84) return 5.0;
+    if (strongestForm >= 76) return 2.5;
+    if (strongestForm < 58) return -4.0;
+    return 0.0;
   }
 }
 
@@ -725,7 +961,7 @@ class _ValueInfo {
     final edge = aiProbability - impliedProbability;
 
     return _ValueInfo(
-      isValueBet: match.aiScore >= 70 && edge >= 0.05,
+      isValueBet: match.aiScore >= 70 && edge >= 0.045,
       aiProbabilityPercent: aiProbability * 100,
       impliedProbabilityPercent: impliedProbability * 100,
       edgePercent: edge * 100,
