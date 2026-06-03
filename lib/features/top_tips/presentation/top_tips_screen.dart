@@ -95,19 +95,19 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 118),
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
-                _TopTipsHeader(
+                _RangeSelector(
+                  selected: _range,
+                  onChanged: _setRange,
+                ),
+                const SizedBox(height: 14),
+                _TopTipsSummaryStrip(
                   rangeLabel: _range.label,
                   matchesCount: matches.length,
                   bestScore: _finalScore(ranked.first),
                   bestAiScore: ranked.first.aiScore,
-                ),
-                const SizedBox(height: 14),
-                _RangeSelector(
-                  selected: _range,
-                  onChanged: _setRange,
                 ),
                 const SizedBox(height: 18),
                 const _SectionTitle(
@@ -382,6 +382,79 @@ class _HeaderMetric extends StatelessWidget {
   }
 }
 
+class _TopTipsSummaryStrip extends StatelessWidget {
+  final String rangeLabel;
+  final int matchesCount;
+  final double bestScore;
+  final int bestAiScore;
+
+  const _TopTipsSummaryStrip({
+    required this.rangeLabel,
+    required this.matchesCount,
+    required this.bestScore,
+    required this.bestAiScore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: KickMindTheme.primary.withOpacity(0.075),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: KickMindTheme.primary.withOpacity(0.12)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: KickMindTheme.primary,
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: const Icon(
+              Icons.auto_graph_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$rangeLabel · $matchesCount Spiele',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: KickMindTheme.textDark,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Bester Final ${bestScore.toStringAsFixed(1)} · AI $bestAiScore%',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: KickMindTheme.textMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _RangeSelector extends StatelessWidget {
   final MatchDateRange selected;
   final ValueChanged<MatchDateRange> onChanged;
@@ -393,19 +466,23 @@ class _RangeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      clipBehavior: Clip.none,
-      child: Row(
-        children: MatchDateRange.values.map((range) {
-          return _RangeChip(
-            label: range.label,
-            range: range,
-            selected: selected,
-            onChanged: onChanged,
-          );
-        }).toList(),
-      ),
+    return Row(
+      children: MatchDateRange.values.map((range) {
+        final index = MatchDateRange.values.indexOf(range);
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(
+              right: index == MatchDateRange.values.length - 1 ? 0 : 8,
+            ),
+            child: _RangeChip(
+              label: range.label,
+              range: range,
+              selected: selected,
+              onChanged: onChanged,
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }
@@ -427,22 +504,49 @@ class _RangeChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final isSelected = selected == range;
 
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        selected: isSelected,
-        label: Text(label),
-        onSelected: (_) => onChanged(range),
-        selectedColor: KickMindTheme.primary.withOpacity(0.14),
-        backgroundColor: KickMindTheme.surface,
-        side: BorderSide(
-          color: isSelected
-              ? KickMindTheme.primary.withOpacity(0.35)
-              : Colors.black.withOpacity(0.06),
+    return InkWell(
+      onTap: () => onChanged(range),
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        height: 52,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isSelected ? KickMindTheme.primaryDark : KickMindTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected
+                ? KickMindTheme.primary.withOpacity(0.55)
+                : Colors.black.withOpacity(0.08),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(isSelected ? 0.10 : 0.035),
+              blurRadius: isSelected ? 12 : 7,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
-        labelStyle: TextStyle(
-          color: isSelected ? KickMindTheme.primary : KickMindTheme.textDark,
-          fontWeight: FontWeight.w900,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isSelected) ...[
+                const Icon(Icons.check_rounded, size: 18, color: Colors.white),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : KickMindTheme.textDark,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -531,8 +635,8 @@ class _TopTipCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(22),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 13),
-        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 15),
         decoration: BoxDecoration(
           color: KickMindTheme.surface,
           borderRadius: BorderRadius.circular(22),
@@ -588,8 +692,8 @@ class _TopTipCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: KickMindTheme.textDark,
-                fontSize: 18,
-                height: 1.14,
+                fontSize: 18.5,
+                height: 1.12,
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -806,7 +910,7 @@ class _ScoreBar extends StatelessWidget {
                 label,
                 style: const TextStyle(
                   color: KickMindTheme.textMuted,
-                  fontSize: 12,
+                  fontSize: 12.5,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -893,7 +997,7 @@ class _StateMessage extends StatelessWidget {
         child: ListView(
           shrinkWrap: true,
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 118),
           children: [
             Icon(icon, size: 48, color: KickMindTheme.textMuted),
             const SizedBox(height: 12),
