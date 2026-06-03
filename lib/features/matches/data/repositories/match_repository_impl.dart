@@ -73,17 +73,112 @@ class MatchRepositoryImpl implements MatchRepository {
     final now = DateTime.now();
     final start = range.startDate(now);
 
-    final fixtures = <({String league, String home, String away, int hour, int minute})>[
-      (league: 'Fallback Liga', home: 'Fallback Team A', away: 'Fallback Team B', hour: 18, minute: 30),
-      (league: 'Fallback Liga', home: 'Fallback City', away: 'Fallback United', hour: 20, minute: 45),
-      (league: 'Fallback Liga', home: 'Fallback SV', away: 'Fallback FC', hour: 21, minute: 0),
+    final fixtures = <_FallbackFixture>[
+      const _FallbackFixture(
+        league: 'Premier League',
+        home: 'Manchester City',
+        away: 'Newcastle United',
+        hour: 18,
+        minute: 30,
+        tipType: TipType.homeWin,
+        odds: 1.62,
+        homeFormScore: 88,
+        awayFormScore: 68,
+        goalsScore: 82,
+      ),
+      const _FallbackFixture(
+        league: 'Bundesliga',
+        home: 'Bayern München',
+        away: 'Eintracht Frankfurt',
+        hour: 20,
+        minute: 30,
+        tipType: TipType.over25,
+        odds: 1.74,
+        homeFormScore: 84,
+        awayFormScore: 71,
+        goalsScore: 91,
+      ),
+      const _FallbackFixture(
+        league: 'La Liga',
+        home: 'Real Madrid',
+        away: 'Valencia',
+        hour: 21,
+        minute: 0,
+        tipType: TipType.homeWin,
+        odds: 1.58,
+        homeFormScore: 87,
+        awayFormScore: 64,
+        goalsScore: 76,
+      ),
+      const _FallbackFixture(
+        league: 'Serie A',
+        home: 'Inter',
+        away: 'Atalanta',
+        hour: 20,
+        minute: 45,
+        tipType: TipType.btts,
+        odds: 1.86,
+        homeFormScore: 80,
+        awayFormScore: 78,
+        goalsScore: 84,
+      ),
+      const _FallbackFixture(
+        league: 'Ligue 1',
+        home: 'PSG',
+        away: 'Lille',
+        hour: 19,
+        minute: 0,
+        tipType: TipType.over25,
+        odds: 1.79,
+        homeFormScore: 86,
+        awayFormScore: 73,
+        goalsScore: 88,
+      ),
+      const _FallbackFixture(
+        league: 'Eredivisie',
+        home: 'PSV Eindhoven',
+        away: 'AZ Alkmaar',
+        hour: 18,
+        minute: 45,
+        tipType: TipType.btts,
+        odds: 1.83,
+        homeFormScore: 83,
+        awayFormScore: 77,
+        goalsScore: 86,
+      ),
+      const _FallbackFixture(
+        league: 'Championship',
+        home: 'Leeds United',
+        away: 'Norwich City',
+        hour: 16,
+        minute: 0,
+        tipType: TipType.homeWin,
+        odds: 1.95,
+        homeFormScore: 78,
+        awayFormScore: 70,
+        goalsScore: 72,
+      ),
+      const _FallbackFixture(
+        league: 'Portugal',
+        home: 'Benfica',
+        away: 'Braga',
+        hour: 21,
+        minute: 15,
+        tipType: TipType.over25,
+        odds: 1.88,
+        homeFormScore: 81,
+        awayFormScore: 74,
+        goalsScore: 83,
+      ),
     ];
+
+    final days = range.durationDays <= 0 ? 1 : range.durationDays;
 
     return fixtures.asMap().entries.map((entry) {
       final i = entry.key;
       final f = entry.value;
       final kickoff = DateTime(start.year, start.month, start.day, f.hour, f.minute)
-          .add(Duration(days: i % range.durationDays));
+          .add(Duration(days: i % days));
 
       return _engine.buildMatch(
         id: 'fallback_${range.name}_$i',
@@ -91,7 +186,38 @@ class MatchRepositoryImpl implements MatchRepository {
         home: f.home,
         away: f.away,
         kickoff: kickoff,
+        tipType: f.tipType,
+        odds: f.odds,
+        homeFormScore: f.homeFormScore,
+        awayFormScore: f.awayFormScore,
+        goalsScore: f.goalsScore,
       );
     }).toList();
   }
+}
+
+class _FallbackFixture {
+  final String league;
+  final String home;
+  final String away;
+  final int hour;
+  final int minute;
+  final TipType tipType;
+  final double odds;
+  final int homeFormScore;
+  final int awayFormScore;
+  final int goalsScore;
+
+  const _FallbackFixture({
+    required this.league,
+    required this.home,
+    required this.away,
+    required this.hour,
+    required this.minute,
+    required this.tipType,
+    required this.odds,
+    required this.homeFormScore,
+    required this.awayFormScore,
+    required this.goalsScore,
+  });
 }
