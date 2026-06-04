@@ -23,6 +23,19 @@ enum _OddsFilter {
   const _OddsFilter(this.label);
 }
 
+
+enum _OddsDecision {
+  premium('Premium Value', 'starker Markt mit Score, Value und Risiko im grünen Bereich'),
+  value('Value Chance', 'positive Value-Kante, aber nicht ganz Premium'),
+  stable('Stabil beobachten', 'solide Quote, aber noch kein klarer Value-Markt'),
+  noBet('No Bet', 'Risiko oder Value passt aktuell nicht');
+
+  final String label;
+  final String explanation;
+
+  const _OddsDecision(this.label, this.explanation);
+}
+
 class _LiveOddsScreenState extends State<LiveOddsScreen> {
   final LiveOddsService _oddsService = const LiveOddsService();
 
@@ -141,11 +154,20 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
       case _OddsFilter.all:
         return items;
       case _OddsFilter.value:
-        return items.where((item) => item.valueEdge >= 3.0).toList();
+        return items
+            .where(
+              (item) => item.decision == _OddsDecision.premium || item.decision == _OddsDecision.value,
+        )
+            .toList();
       case _OddsFilter.safe:
-        return items.where((item) => item.riskLevel == 'Niedrig').toList();
+        return items
+            .where(
+              (item) => item.decision == _OddsDecision.stable ||
+              (item.riskLevel == 'Niedrig' && item.decision != _OddsDecision.noBet),
+        )
+            .toList();
       case _OddsFilter.risk:
-        return items.where((item) => item.riskLevel == 'Hoch').toList();
+        return items.where((item) => item.decision == _OddsDecision.noBet).toList();
     }
   }
 
@@ -195,6 +217,9 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
             final opportunities = _buildOpportunities(odds);
             final filtered = _filterOpportunities(opportunities);
             final best = opportunities.isEmpty ? null : opportunities.first;
+            final premiumCount = opportunities.where((item) => item.decision == _OddsDecision.premium).length;
+            final valueCount = opportunities.where((item) => item.decision == _OddsDecision.value).length;
+            final noBetCount = opportunities.where((item) => item.decision == _OddsDecision.noBet).length;
 
             return CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -205,6 +230,9 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
                     child: _OddsRadarHeader(
                       matchCount: odds.length,
                       opportunityCount: opportunities.length,
+                      premiumCount: premiumCount,
+                      valueCount: valueCount,
+                      noBetCount: noBetCount,
                       best: best,
                     ),
                   ),
@@ -340,11 +368,17 @@ class _LiveOddsEmptyState extends StatelessWidget {
 class _OddsRadarHeader extends StatelessWidget {
   final int matchCount;
   final int opportunityCount;
+  final int premiumCount;
+  final int valueCount;
+  final int noBetCount;
   final _OddsOpportunity? best;
 
   const _OddsRadarHeader({
     required this.matchCount,
     required this.opportunityCount,
+    required this.premiumCount,
+    required this.valueCount,
+    required this.noBetCount,
     required this.best,
   });
 
@@ -389,6 +423,16 @@ class _OddsRadarHeader extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _HeaderMiniPill(label: 'Premium', value: premiumCount),
+              _HeaderMiniPill(label: 'Value', value: valueCount),
+              _HeaderMiniPill(label: 'No Bet', value: noBetCount),
+            ],
+          ),
           if (bestItem != null) ...[
             const SizedBox(height: 14),
             Container(
@@ -407,7 +451,7 @@ class _OddsRadarHeader extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      '${bestItem.marketLabel} · ${bestItem.odds.homeTeam} vs ${bestItem.odds.awayTeam}',
+                      '${bestItem.decision.label} · ${bestItem.marketLabel} · ${bestItem.odds.homeTeam} vs ${bestItem.odds.awayTeam}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -423,6 +467,36 @@ class _OddsRadarHeader extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _HeaderMiniPill extends StatelessWidget {
+  final String label;
+  final int value;
+
+  const _HeaderMiniPill({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
+      ),
+      child: Text(
+        '$label $value',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
@@ -522,12 +596,7 @@ class _OpportunityCard extends StatelessWidget {
     required this.rank,
   });
 
-  Color get _accent {
-    if (item.finalScore >= 72) return const Color(0xFF16A34A);
-    if (item.finalScore >= 62) return const Color(0xFF2563EB);
-    if (item.riskLevel == 'Hoch') return const Color(0xFFEA580C);
-    return const Color(0xFF64748B);
-  }
+  Color get _accent => item.decisionColor;
 
   @override
   Widget build(BuildContext context) {
@@ -569,6 +638,11 @@ class _OpportunityCard extends StatelessWidget {
               const SizedBox(width: 10),
               _BookmakerBadge(text: item.odds.bookmaker),
             ],
+          ),
+          const SizedBox(height: 10),
+          _DecisionBadge(
+            label: item.decision.label,
+            color: item.decisionColor,
           ),
           const SizedBox(height: 14),
           Row(
@@ -639,7 +713,7 @@ class _OpportunityCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            item.reason,
+            item.finalReason,
             style: TextStyle(
               color: Colors.grey.shade700,
               height: 1.35,
@@ -666,6 +740,38 @@ class _OpportunityCard extends StatelessWidget {
     final hour = value.hour.toString().padLeft(2, '0');
     final minute = value.minute.toString().padLeft(2, '0');
     return '$day.$month. $hour:$minute';
+  }
+}
+
+class _DecisionBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _DecisionBadge({
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.16)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
   }
 }
 
@@ -864,7 +970,10 @@ class _OddsOpportunity {
   final double confidence;
   final String riskLevel;
   final Color riskColor;
+  final _OddsDecision decision;
+  final Color decisionColor;
   final String reason;
+  final String finalReason;
 
   const _OddsOpportunity({
     required this.odds,
@@ -877,7 +986,10 @@ class _OddsOpportunity {
     required this.confidence,
     required this.riskLevel,
     required this.riskColor,
+    required this.decision,
+    required this.decisionColor,
     required this.reason,
+    required this.finalReason,
   });
 
   factory _OddsOpportunity.from({
@@ -894,7 +1006,24 @@ class _OddsOpportunity {
       marketType: marketType,
     );
     final risk = score.riskLevel;
+    final decision = _decisionFor(
+      finalScore: score.finalScore,
+      valueEdge: score.valueEdge,
+      confidence: score.confidence,
+      riskLevel: risk,
+      oddsValue: value,
+    );
     final color = _riskColor(risk);
+    final decisionColor = _decisionColor(decision);
+    final finalReason = _buildFinalReason(
+      decision: decision,
+      baseReason: score.reason,
+      finalScore: score.finalScore,
+      valueEdge: score.valueEdge,
+      confidence: score.confidence,
+      riskLevel: risk,
+      oddsValue: value,
+    );
 
     return _OddsOpportunity(
       odds: odds,
@@ -907,8 +1036,73 @@ class _OddsOpportunity {
       confidence: score.confidence,
       riskLevel: risk,
       riskColor: color,
+      decision: decision,
+      decisionColor: decisionColor,
       reason: score.reason,
+      finalReason: finalReason,
     );
+  }
+
+  static _OddsDecision _decisionFor({
+    required double finalScore,
+    required double valueEdge,
+    required double confidence,
+    required String riskLevel,
+    required double oddsValue,
+  }) {
+    final extremeOdds = oddsValue >= 4.80 || oddsValue <= 1.28;
+
+    if (riskLevel == 'Hoch' || finalScore < 54 || valueEdge < -2.0 || extremeOdds) {
+      return _OddsDecision.noBet;
+    }
+
+    if (finalScore >= 74 && valueEdge >= 4.0 && confidence >= 68 && riskLevel != 'Hoch') {
+      return _OddsDecision.premium;
+    }
+
+    if (finalScore >= 64 && valueEdge >= 2.0 && confidence >= 58 && riskLevel != 'Hoch') {
+      return _OddsDecision.value;
+    }
+
+    return _OddsDecision.stable;
+  }
+
+  static Color _decisionColor(_OddsDecision decision) {
+    switch (decision) {
+      case _OddsDecision.premium:
+        return const Color(0xFF16A34A);
+      case _OddsDecision.value:
+        return const Color(0xFF2563EB);
+      case _OddsDecision.stable:
+        return const Color(0xFF64748B);
+      case _OddsDecision.noBet:
+        return const Color(0xFFEA580C);
+    }
+  }
+
+  static String _buildFinalReason({
+    required _OddsDecision decision,
+    required String baseReason,
+    required double finalScore,
+    required double valueEdge,
+    required double confidence,
+    required String riskLevel,
+    required double oddsValue,
+  }) {
+    final valueText = valueEdge >= 0
+        ? '+${valueEdge.toStringAsFixed(1)} Value'
+        : '${valueEdge.toStringAsFixed(1)} Value';
+
+    switch (decision) {
+      case _OddsDecision.premium:
+        return 'Premium Value: Final ${finalScore.toStringAsFixed(0)}, $valueText, Konfidenz ${confidence.toStringAsFixed(0)}% und Risiko $riskLevel. $baseReason';
+      case _OddsDecision.value:
+        return 'Value Chance: Die Quote hat eine positive Kante, bleibt aber unter Premium-Niveau. Final ${finalScore.toStringAsFixed(0)}, $valueText, Quote ${oddsValue.toStringAsFixed(2)}. $baseReason';
+      case _OddsDecision.stable:
+        return 'Stabil beobachten: Markt ist nicht schwach, aber der Value reicht noch nicht für einen klaren Einsatz. Final ${finalScore.toStringAsFixed(0)}, $valueText. $baseReason';
+      case _OddsDecision.noBet:
+        return 'No Bet: Quote, Risiko oder Value-Kante sind aktuell nicht sauber genug. Final ${finalScore.toStringAsFixed(0)}, $valueText, Risiko $riskLevel, Quote ${oddsValue.toStringAsFixed(2)}. $baseReason';
+    }
   }
 
   static Color _riskColor(String label) {
