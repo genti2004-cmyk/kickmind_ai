@@ -81,23 +81,13 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
           }
 
           final ranked = matches..sort(_compareByFinalScore);
-
-          final recommended = ranked.where(_isRecommendedTip).toList();
-          final visibleTopTips = recommended.isNotEmpty
-              ? recommended
-              : ranked.take(5).toList();
-
-          final valueBets = ranked.where(_isValueBet).take(4).toList();
-          final watchList = ranked
-              .where((match) => !visibleTopTips.contains(match))
-              .where((match) => _finalScore(match) >= 58)
-              .take(6)
-              .toList();
+          final buckets = _buildBuckets(ranked);
+          final best = ranked.first;
 
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 118),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 126),
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
                 _RangeSelector(
@@ -108,56 +98,88 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                 _TopTipsSummaryStrip(
                   rangeLabel: _range.label,
                   matchesCount: matches.length,
-                  bestScore: _finalScore(ranked.first),
-                  bestAiScore: ranked.first.aiScore,
+                  topTipsCount: buckets.premium.length,
+                  valueCount: buckets.value.length,
+                  noBetCount: buckets.noBet.length,
+                  bestScore: _finalScore(best),
+                  bestAiScore: best.aiScore,
                 ),
                 const SizedBox(height: 18),
                 const _SectionTitle(
-                  icon: Icons.auto_awesome_rounded,
-                  title: 'Beste Auswahl',
-                  subtitle: 'AI-Score, Value-Edge, Risiko und Quote kombiniert.',
+                  icon: Icons.workspace_premium_rounded,
+                  title: 'Premium Top Tipps',
+                  subtitle: 'Nur Tipps mit starker Kombination aus AI, Final Score, Value und Risiko.',
                 ),
                 const SizedBox(height: 12),
-                ...visibleTopTips.take(8).map(
-                      (match) => _TopTipCard(
-                    match: match,
-                    rank: visibleTopTips.indexOf(match) + 1,
-                    finalScore: _finalScore(match),
-                    valueEdge: _valueEdge(match),
-                    confidence: _confidence(match),
-                    onTap: () => _openDetail(match),
+                if (buckets.premium.isEmpty)
+                  _NoPremiumTipNotice(
+                    message: 'Aktuell kein Tipp stark genug für Premium. Die besten Kandidaten liegen unten unter Beobachten.',
+                  )
+                else
+                  ...buckets.premium.map(
+                        (match) => _TopTipCard(
+                      match: match,
+                      rank: buckets.premium.indexOf(match) + 1,
+                      finalScore: _finalScore(match),
+                      valueEdge: _valueEdge(match),
+                      confidence: _confidence(match),
+                      statusLabel: _statusLabel(match),
+                      onTap: () => _openDetail(match),
+                    ),
                   ),
-                ),
-                if (valueBets.isNotEmpty) ...[
+                if (buckets.value.isNotEmpty) ...[
                   const SizedBox(height: 18),
                   const _SectionTitle(
                     icon: Icons.trending_up_rounded,
                     title: 'Value Chancen',
-                    subtitle: 'AI-Wahrscheinlichkeit liegt über der impliziten Quote.',
+                    subtitle: 'Interessante Quote, aber nicht automatisch ein sicherer Tipp.',
                   ),
                   const SizedBox(height: 12),
-                  ...valueBets.map(
+                  ...buckets.value.map(
                         (match) => _CompactTipCard(
                       match: match,
                       finalScore: _finalScore(match),
                       valueEdge: _valueEdge(match),
+                      statusLabel: 'Value',
+                      statusColor: KickMindTheme.success,
                       onTap: () => _openDetail(match),
                     ),
                   ),
                 ],
-                if (watchList.isNotEmpty) ...[
+                if (buckets.watch.isNotEmpty) ...[
                   const SizedBox(height: 18),
                   const _SectionTitle(
                     icon: Icons.visibility_rounded,
                     title: 'Beobachten',
-                    subtitle: 'Interessant, aber noch kein klarer Premium-Tipp.',
+                    subtitle: 'Solide Ansätze, aber Final Score oder Risiko noch nicht stark genug.',
                   ),
                   const SizedBox(height: 12),
-                  ...watchList.map(
+                  ...buckets.watch.map(
                         (match) => _CompactTipCard(
                       match: match,
                       finalScore: _finalScore(match),
                       valueEdge: _valueEdge(match),
+                      statusLabel: 'Watch',
+                      statusColor: KickMindTheme.primary,
+                      onTap: () => _openDetail(match),
+                    ),
+                  ),
+                ],
+                if (buckets.noBet.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  const _SectionTitle(
+                    icon: Icons.block_rounded,
+                    title: 'No Bet',
+                    subtitle: 'Zu wenig Edge, zu hohes Risiko oder zu schwacher Final Score.',
+                  ),
+                  const SizedBox(height: 12),
+                  ...buckets.noBet.take(6).map(
+                        (match) => _CompactTipCard(
+                      match: match,
+                      finalScore: _finalScore(match),
+                      valueEdge: _valueEdge(match),
+                      statusLabel: 'No Bet',
+                      statusColor: Colors.redAccent,
                       onTap: () => _openDetail(match),
                     ),
                   ),
@@ -167,6 +189,51 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
           );
         },
       ),
+    );
+  }
+
+  _TopTipBuckets _buildBuckets(List<FootballMatch> ranked) {
+    final premium = <FootballMatch>[];
+    final value = <FootballMatch>[];
+    final watch = <FootballMatch>[];
+    final noBet = <FootballMatch>[];
+
+    for (final match in ranked) {
+      final finalScore = _finalScore(match);
+      final confidence = _confidence(match);
+      final valueEdge = _valueEdge(match);
+      final highRisk = _isHighRisk(match);
+      final oddsExtreme = match.odds >= 4.50;
+
+      final premiumCandidate = finalScore >= 72 &&
+          confidence >= 66 &&
+          match.aiScore >= 68 &&
+          !highRisk &&
+          !oddsExtreme;
+
+      final valueCandidate = valueEdge >= 5.0 &&
+          finalScore >= 64 &&
+          confidence >= 58 &&
+          !highRisk;
+
+      final watchCandidate = finalScore >= 58 && confidence >= 52;
+
+      if (premiumCandidate || _isRecommendedTip(match)) {
+        premium.add(match);
+      } else if (valueCandidate || _isValueBet(match)) {
+        value.add(match);
+      } else if (watchCandidate && !highRisk) {
+        watch.add(match);
+      } else {
+        noBet.add(match);
+      }
+    }
+
+    return _TopTipBuckets(
+      premium: premium.take(7).toList(),
+      value: value.take(5).toList(),
+      watch: watch.take(7).toList(),
+      noBet: noBet,
     );
   }
 
@@ -191,6 +258,24 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     return _scoreService.isValueBet(match);
   }
 
+  bool _isHighRisk(FootballMatch match) {
+    final risk = match.riskLevel.toLowerCase();
+    return risk.contains('hoch') || risk.contains('high');
+  }
+
+  String _statusLabel(FootballMatch match) {
+    final finalScore = _finalScore(match);
+    final valueEdge = _valueEdge(match);
+
+    if (finalScore >= 78 && valueEdge >= 3) return 'Top Tipp';
+    if (valueEdge >= 5) return 'Value Tipp';
+    if (match.riskLevel.toLowerCase().contains('niedrig') ||
+        match.riskLevel.toLowerCase().contains('low')) {
+      return 'Stabil';
+    }
+    return 'Premium';
+  }
+
   double _finalScore(FootballMatch match) {
     return _scoreService.score(match).finalScore;
   }
@@ -202,18 +287,37 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
   double _valueEdge(FootballMatch match) {
     return _scoreService.score(match).valueEdge;
   }
-
 }
 
-class _TopTipsHeader extends StatelessWidget {
+class _TopTipBuckets {
+  final List<FootballMatch> premium;
+  final List<FootballMatch> value;
+  final List<FootballMatch> watch;
+  final List<FootballMatch> noBet;
+
+  const _TopTipBuckets({
+    required this.premium,
+    required this.value,
+    required this.watch,
+    required this.noBet,
+  });
+}
+
+class _TopTipsSummaryStrip extends StatelessWidget {
   final String rangeLabel;
   final int matchesCount;
+  final int topTipsCount;
+  final int valueCount;
+  final int noBetCount;
   final double bestScore;
   final int bestAiScore;
 
-  const _TopTipsHeader({
+  const _TopTipsSummaryStrip({
     required this.rangeLabel,
     required this.matchesCount,
+    required this.topTipsCount,
+    required this.valueCount,
+    required this.noBetCount,
     required this.bestScore,
     required this.bestAiScore,
   });
@@ -221,60 +325,85 @@ class _TopTipsHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            KickMindTheme.primaryDark,
-            KickMindTheme.primary,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: KickMindTheme.primary.withOpacity(0.24),
-            blurRadius: 22,
-            offset: const Offset(0, 12),
-          ),
-        ],
+        color: KickMindTheme.primary.withOpacity(0.075),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: KickMindTheme.primary.withOpacity(0.12)),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'KickMind AI Ranking',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              height: 1.1,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: KickMindTheme.primary,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: const Icon(
+                  Icons.auto_graph_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$rangeLabel · $matchesCount Spiele analysiert',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: KickMindTheme.textDark,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Bester Final ${bestScore.toStringAsFixed(1)} · AI $bestAiScore%',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: KickMindTheme.textMuted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            '$rangeLabel · $matchesCount Spiele analysiert',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.78),
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: _HeaderMetric(
-                  label: 'Final Score',
-                  value: bestScore.toStringAsFixed(1),
+                child: _SummaryMiniMetric(
+                  label: 'Premium',
+                  value: '$topTipsCount',
+                  color: KickMindTheme.primary,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
-                child: _HeaderMetric(
-                  label: 'Bester AI',
-                  value: '$bestAiScore%',
+                child: _SummaryMiniMetric(
+                  label: 'Value',
+                  value: '$valueCount',
+                  color: KickMindTheme.success,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _SummaryMiniMetric(
+                  label: 'No Bet',
+                  value: '$noBetCount',
+                  color: Colors.redAccent,
                 ),
               ),
             ],
@@ -285,114 +414,45 @@ class _TopTipsHeader extends StatelessWidget {
   }
 }
 
-class _HeaderMetric extends StatelessWidget {
+class _SummaryMiniMetric extends StatelessWidget {
   final String label;
   final String value;
+  final Color color;
 
-  const _HeaderMetric({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.13),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.14)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.72),
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 19,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TopTipsSummaryStrip extends StatelessWidget {
-  final String rangeLabel;
-  final int matchesCount;
-  final double bestScore;
-  final int bestAiScore;
-
-  const _TopTipsSummaryStrip({
-    required this.rangeLabel,
-    required this.matchesCount,
-    required this.bestScore,
-    required this.bestAiScore,
+  const _SummaryMiniMetric({
+    required this.label,
+    required this.value,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
-        color: KickMindTheme.primary.withOpacity(0.075),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: KickMindTheme.primary.withOpacity(0.12)),
+        color: color.withOpacity(0.09),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.12)),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: KickMindTheme.primary,
-              borderRadius: BorderRadius.circular(15),
-            ),
-            child: const Icon(
-              Icons.auto_graph_rounded,
-              color: Colors.white,
-              size: 22,
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$rangeLabel · $matchesCount Spiele',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: KickMindTheme.textDark,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  'Bester Final ${bestScore.toStringAsFixed(1)} · AI $bestAiScore%',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: KickMindTheme.textMuted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: KickMindTheme.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ],
@@ -555,12 +615,48 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
+class _NoPremiumTipNotice extends StatelessWidget {
+  final String message;
+
+  const _NoPremiumTipNotice({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.amber.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.amber.withOpacity(0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, color: Colors.amber, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: KickMindTheme.textDark,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TopTipCard extends StatelessWidget {
   final FootballMatch match;
   final int rank;
   final double finalScore;
   final double valueEdge;
   final double confidence;
+  final String statusLabel;
   final VoidCallback onTap;
 
   const _TopTipCard({
@@ -569,6 +665,7 @@ class _TopTipCard extends StatelessWidget {
     required this.finalScore,
     required this.valueEdge,
     required this.confidence,
+    required this.statusLabel,
     required this.onTap,
   });
 
@@ -605,6 +702,8 @@ class _TopTipCard extends StatelessWidget {
             Row(
               children: [
                 _RankBadge(rank: rank),
+                const SizedBox(width: 10),
+                _StatusBadge(text: statusLabel, color: KickMindTheme.primary),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -690,12 +789,16 @@ class _CompactTipCard extends StatelessWidget {
   final FootballMatch match;
   final double finalScore;
   final double valueEdge;
+  final String statusLabel;
+  final Color statusColor;
   final VoidCallback onTap;
 
   const _CompactTipCard({
     required this.match,
     required this.finalScore,
     required this.valueEdge,
+    required this.statusLabel,
+    required this.statusColor,
     required this.onTap,
   });
 
@@ -717,8 +820,8 @@ class _CompactTipCard extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 42,
-              height: 42,
+              width: 44,
+              height: 44,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: scoreColor.withOpacity(0.12),
@@ -738,6 +841,25 @@ class _CompactTipCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Row(
+                    children: [
+                      _StatusBadge(text: statusLabel, color: statusColor),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          match.league,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: KickMindTheme.textMuted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
                   Text(
                     match.teamsLabel,
                     maxLines: 1,
@@ -750,7 +872,7 @@ class _CompactTipCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge.toStringAsFixed(1)}%',
+                    '${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge.toStringAsFixed(1)}% · Quote ${match.odds.toStringAsFixed(2)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -796,6 +918,35 @@ class _RankBadge extends StatelessWidget {
           color: isTop ? Colors.white : KickMindTheme.primary,
           fontWeight: FontWeight.w900,
           fontSize: 13,
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _StatusBadge({required this.text, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.11),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.12)),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w900,
         ),
       ),
     );
@@ -943,7 +1094,7 @@ class _StateMessage extends StatelessWidget {
         child: ListView(
           shrinkWrap: true,
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 118),
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 126),
           children: [
             Icon(icon, size: 48, color: KickMindTheme.textMuted),
             const SizedBox(height: 12),
