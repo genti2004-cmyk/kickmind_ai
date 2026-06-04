@@ -17,6 +17,7 @@ class FootballApiService {
   static final Map<String, List<FootballMatch>> _rangeCache = <String, List<FootballMatch>>{};
   static final Map<String, DateTime> _rangeCacheTime = <String, DateTime>{};
   static const Duration _cacheDuration = Duration(minutes: 30);
+  static const int _maxDaysPerRequest = 7;
 
   Future<List<FootballMatch>> fetchTodayFixtures({bool forceRefresh = false}) {
     return fetchFixturesForRange(
@@ -32,14 +33,17 @@ class FootballApiService {
     bool forceRefresh = false,
   }) async {
     final normalizedStart = DateTime(start.year, start.month, start.day);
-    final safeDays = days < 1 ? 1 : days;
+    final safeDays = days.clamp(1, _maxDaysPerRequest).toInt();
     final key = '${_formatDate(normalizedStart)}_$safeDays';
     final now = DateTime.now();
 
     if (!forceRefresh && _rangeCache.containsKey(key)) {
       final cacheTime = _rangeCacheTime[key];
-      if (cacheTime != null && now.difference(cacheTime) < _cacheDuration) {
-        return _rangeCache[key]!;
+      final cached = _rangeCache[key];
+      if (cacheTime != null &&
+          cached != null &&
+          now.difference(cacheTime) < _cacheDuration) {
+        return List<FootballMatch>.from(cached);
       }
     }
 
@@ -51,15 +55,12 @@ class FootballApiService {
       all.addAll(dayMatches);
     }
 
-    final unique = <String, FootballMatch>{};
-    for (final match in all) {
-      unique[match.id] = match;
-    }
+    final result = _dedupeAndSort(all)
+        .where((match) => _isInsideRange(match.kickoff, normalizedStart, safeDays))
+        .take(160)
+        .toList();
 
-    final result = unique.values.toList()
-      ..sort((a, b) => a.kickoff.compareTo(b.kickoff));
-
-    _rangeCache[key] = result;
+    _rangeCache[key] = List<FootballMatch>.from(result);
     _rangeCacheTime[key] = DateTime.now();
 
     return result;
@@ -68,8 +69,13 @@ class FootballApiService {
   Future<List<FootballMatch>> _fetchDayFromSportsDb(DateTime day) async {
     try {
       final date = _formatDate(day);
-      final uri = Uri.parse(
-        'https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=$date&s=Soccer',
+      final uri = Uri.https(
+        'www.thesportsdb.com',
+        '/api/v1/json/123/eventsday.php',
+        <String, String>{
+          'd': date,
+          's': 'Soccer',
+        },
       );
 
       final response = await _client.get(uri).timeout(const Duration(seconds: 12));
@@ -86,20 +92,19 @@ class FootballApiService {
       for (final raw in events) {
         if (raw is! Map<String, dynamic>) continue;
 
-        final home = raw['strHomeTeam']?.toString().trim();
-        final away = raw['strAwayTeam']?.toString().trim();
-        if (home == null || home.isEmpty || away == null || away.isEmpty) continue;
+        final home = _clean(raw['strHomeTeam']);
+        final away = _clean(raw['strAwayTeam']);
+        if (home == null || away == null) continue;
 
-        final league = raw['strLeague']?.toString().trim();
-        final rawDate = raw['dateEventLocal']?.toString() ?? raw['dateEvent']?.toString() ?? date;
-        final rawTime = raw['strTimeLocal']?.toString() ?? raw['strTime']?.toString() ?? '12:00:00';
-        final kickoff = _parseKickoff(rawDate, rawTime, day).toLocal();
+        final league = _clean(raw['strLeague']) ?? 'Soccer';
+        final id = _clean(raw['idEvent']) ?? '${home}_${away}_${date}';
+        final kickoff = _parseKickoff(raw, fallbackDay: day);
 
         result.add(
           _predictionEngine.buildMatch(
-            id: raw['idEvent']?.toString() ?? '${home}_${away}_${kickoff.millisecondsSinceEpoch}',
-            fixtureId: int.tryParse(raw['idEvent']?.toString() ?? ''),
-            league: league == null || league.isEmpty ? 'Soccer' : league,
+            id: id,
+            fixtureId: int.tryParse(id),
+            league: league,
             home: home,
             away: away,
             kickoff: kickoff,
@@ -107,14 +112,49 @@ class FootballApiService {
         );
       }
 
-      result.sort((a, b) => a.kickoff.compareTo(b.kickoff));
-      return result.take(80).toList();
+      return _dedupeAndSort(result).take(80).toList();
     } catch (_) {
       return <FootballMatch>[];
     }
   }
 
-  DateTime _parseKickoff(String rawDate, String rawTime, DateTime fallback) {
+  List<FootballMatch> _dedupeAndSort(List<FootballMatch> matches) {
+    final unique = <String, FootballMatch>{};
+
+    for (final match in matches) {
+      final key = match.fixtureId?.toString() ??
+          '${match.id}_${match.homeTeam}_${match.awayTeam}_${match.kickoff.millisecondsSinceEpoch}';
+      unique[key] = match;
+    }
+
+    final result = unique.values.toList()
+      ..sort((a, b) => a.kickoff.compareTo(b.kickoff));
+    return result;
+  }
+
+  bool _isInsideRange(DateTime kickoff, DateTime start, int days) {
+    final from = DateTime(start.year, start.month, start.day);
+    final to = from.add(Duration(days: days));
+    return !kickoff.isBefore(from) && kickoff.isBefore(to);
+  }
+
+  DateTime _parseKickoff(
+      Map<String, dynamic> raw, {
+        required DateTime fallbackDay,
+      }) {
+    final timestamp = _clean(raw['strTimestamp']);
+    if (timestamp != null) {
+      final parsedTimestamp = DateTime.tryParse(timestamp.replaceAll(' ', 'T'));
+      if (parsedTimestamp != null) return parsedTimestamp.toLocal();
+    }
+
+    final rawDate = _clean(raw['dateEventLocal']) ??
+        _clean(raw['dateEvent']) ??
+        _formatDate(fallbackDay);
+    final rawTime = _clean(raw['strTimeLocal']) ??
+        _clean(raw['strTime']) ??
+        '12:00:00';
+
     final cleanTime = rawTime.replaceAll('Z', '').trim();
     final candidates = <String>[
       '${rawDate}T$cleanTime',
@@ -124,9 +164,21 @@ class FootballApiService {
 
     for (final candidate in candidates) {
       final parsed = DateTime.tryParse(candidate);
-      if (parsed != null) return parsed;
+      if (parsed != null) return parsed.toLocal();
     }
-    return fallback;
+
+    return DateTime(
+      fallbackDay.year,
+      fallbackDay.month,
+      fallbackDay.day,
+      12,
+    );
+  }
+
+  String? _clean(Object? value) {
+    final text = value?.toString().trim();
+    if (text == null || text.isEmpty || text == 'null') return null;
+    return text;
   }
 
   String _formatDate(DateTime d) {
