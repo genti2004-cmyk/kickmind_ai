@@ -71,7 +71,16 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Match Analyse'),
+        backgroundColor: KickMindTheme.primaryDark,
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        elevation: 0,
+        centerTitle: true,
+        title: const Text(
+          'Match Analyse',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
         actions: [
           IconButton(
             onPressed: _loading ? null : _toggleSaved,
@@ -83,7 +92,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 156),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -102,12 +111,10 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                 valueInfo: valueInfo,
               ),
               const SizedBox(height: 16),
-              if (valueInfo.isValueBet) ...[
-                const _SectionTitle('Value Bet Erklärung'),
-                const SizedBox(height: 10),
-                _ValueExplanation(match: match, valueInfo: valueInfo),
-                const SizedBox(height: 16),
-              ],
+              const _SectionTitle('Value Bet Erklärung'),
+              const SizedBox(height: 10),
+              _ValueExplanation(match: match, valueInfo: valueInfo),
+              const SizedBox(height: 16),
               const _SectionTitle('AI Breakdown'),
               const SizedBox(height: 10),
               _BreakdownCard(breakdown: breakdown),
@@ -120,19 +127,12 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
               const SizedBox(height: 10),
               _FormComparison(match: match),
               const SizedBox(height: 16),
-              const _SectionTitle('Begründung'),
+              const _SectionTitle('Pro Kurzbewertung'),
               const SizedBox(height: 10),
-              _PremiumCard(
-                child: Text(
-                  breakdown.reason.trim().isEmpty
-                      ? match.shortReason
-                      : breakdown.reason,
-                  style: TextStyle(
-                    color: Colors.grey.shade800,
-                    height: 1.45,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+              _ProShortReview(
+                match: match,
+                breakdown: breakdown,
+                valueInfo: valueInfo,
               ),
               const SizedBox(height: 16),
               const _SectionTitle('Gewinnsimulation'),
@@ -335,10 +335,10 @@ class _ValueExplanation extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Value Bet erkannt',
+          Text(
+            valueInfo.isValueBet ? 'Value Bet erkannt' : 'Value-Prüfung',
             style: TextStyle(
-              color: KickMindTheme.success,
+              color: valueInfo.isValueBet ? KickMindTheme.success : KickMindTheme.primaryDark,
               fontSize: 16,
               fontWeight: FontWeight.w900,
             ),
@@ -372,7 +372,9 @@ class _ValueExplanation extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Die AI-Wahrscheinlichkeit liegt über der aus der Quote abgeleiteten Wahrscheinlichkeit. Das ist ein Value-Hinweis, keine Garantie.',
+            valueInfo.isValueBet
+                ? 'AI-Wahrscheinlichkeit liegt klar über der impliziten Quote. Value vorhanden, aber keine Garantie.'
+                : 'Aktuell kein klarer Value-Vorteil. Die Quote liefert keinen ausreichenden Edge für eine Premium-Einstufung.',
             style: TextStyle(
               color: Colors.grey.shade800,
               height: 1.4,
@@ -647,7 +649,11 @@ class _StatTile extends StatelessWidget {
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
+            style: const TextStyle(
+              color: Color(0xFF111827),
+              fontSize: 21,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ],
       ),
@@ -676,9 +682,130 @@ class _InfoRow extends StatelessWidget {
               ),
             ),
           ),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF111827),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
         ],
       ),
+    );
+  }
+}
+
+
+class _ProShortReview extends StatelessWidget {
+  final FootballMatch match;
+  final PredictionBreakdown breakdown;
+  final _ValueInfo valueInfo;
+
+  const _ProShortReview({
+    required this.match,
+    required this.breakdown,
+    required this.valueInfo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final riskColor = KickMindTheme.riskColor(match.riskLevel);
+    final edgeText = valueInfo.edgePercent >= 0
+        ? '+${valueInfo.edgePercent.toStringAsFixed(1)}%'
+        : '${valueInfo.edgePercent.toStringAsFixed(1)}%';
+
+    return _PremiumCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _ReviewLine(
+            title: 'Empfehlung',
+            text: '${match.tipLabel} · AI ${match.aiScore}% · Confidence ${breakdown.confidence}%',
+            icon: Icons.auto_graph_rounded,
+            color: KickMindTheme.primary,
+          ),
+          const SizedBox(height: 12),
+          _ReviewLine(
+            title: 'Warum?',
+            text: 'Finaler Score aus Form, Heim/Auswärts, Tore-Trend, H2H und Tabellenlage.',
+            icon: Icons.insights_rounded,
+            color: KickMindTheme.accent,
+          ),
+          const SizedBox(height: 12),
+          _ReviewLine(
+            title: 'Risiko',
+            text: '${match.riskLevel} · Quote ${match.odds.toStringAsFixed(2)}',
+            icon: Icons.shield_rounded,
+            color: riskColor,
+          ),
+          const SizedBox(height: 12),
+          _ReviewLine(
+            title: 'Value',
+            text: valueInfo.isValueBet
+                ? 'Edge $edgeText · Quote bietet rechnerischen Vorteil.'
+                : 'Edge $edgeText · kein klarer Value-Vorteil.',
+            icon: Icons.trending_up_rounded,
+            color: valueInfo.isValueBet ? KickMindTheme.success : Colors.grey.shade700,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReviewLine extends StatelessWidget {
+  final String title;
+  final String text;
+  final IconData icon;
+  final Color color;
+
+  const _ReviewLine({
+    required this.title,
+    required this.text,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Color(0xFF111827),
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                text,
+                style: TextStyle(
+                  color: Colors.grey.shade700,
+                  height: 1.35,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -767,7 +894,11 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+      style: const TextStyle(
+        color: Color(0xFF111827),
+        fontSize: 18,
+        fontWeight: FontWeight.w900,
+      ),
     );
   }
 }
