@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:kickmind_ai/core/scoring/top_tip_score_service.dart';
 import 'package:kickmind_ai/core/theme/kickmind_theme.dart';
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/predictions/domain/prediction_breakdown.dart';
@@ -30,8 +29,6 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     const MockTeamStatsRepository().buildInput(match),
   );
 
-  late final TopTipScore topScore = TopTipScore.fromMatch(match);
-  late final _TipDecision decision = _TipDecision.fromMatch(match);
   late final _ValueInfo valueInfo = _ValueInfo.fromMatch(match);
 
   @override
@@ -68,21 +65,15 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scoreColor = KickMindTheme.scoreColor(match.aiScore);
     final possibleReturn = _stake * match.odds;
     final profit = possibleReturn - _stake;
 
     return Scaffold(
-      backgroundColor: KickMindTheme.background,
       appBar: AppBar(
-        title: const Text('Pro Analyse'),
-        backgroundColor: const Color(0xFF061B2D),
-        foregroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        elevation: 0,
+        title: const Text('Match Analyse'),
         actions: [
           IconButton(
-            tooltip: _saved ? 'Tipp entfernen' : 'Tipp speichern',
             onPressed: _loading ? null : _toggleSaved,
             icon: Icon(
               _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
@@ -92,33 +83,22 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 156),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _Hero(
                 match: match,
                 breakdown: breakdown,
-                topScore: topScore,
-                decision: decision,
+                scoreColor: scoreColor,
                 valueInfo: valueInfo,
               ),
-              const SizedBox(height: 16),
-              const _SectionTitle('Finale Entscheidung'),
-              const SizedBox(height: 10),
-              _DecisionCard(decision: decision),
-              const SizedBox(height: 16),
-              const _SectionTitle('Top-Tipps Bewertung'),
-              const SizedBox(height: 10),
-              _TopTipsScoreCard(match: match, topScore: topScore),
               const SizedBox(height: 16),
               const _SectionTitle('KI Empfehlung'),
               const SizedBox(height: 10),
               _Recommendation(
                 match: match,
                 breakdown: breakdown,
-                topScore: topScore,
-                decision: decision,
                 valueInfo: valueInfo,
               ),
               const SizedBox(height: 16),
@@ -134,23 +114,18 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
               const SizedBox(height: 16),
               const _SectionTitle('Analysewerte'),
               const SizedBox(height: 10),
-              _StatsGrid(match: match, breakdown: breakdown, topScore: topScore),
+              _StatsGrid(match: match, breakdown: breakdown),
               const SizedBox(height: 16),
               const _SectionTitle('Formvergleich'),
               const SizedBox(height: 10),
               _FormComparison(match: match),
               const SizedBox(height: 16),
-              const _SectionTitle('Begründung'),
+              const _SectionTitle('Pro Kurzbewertung'),
               const SizedBox(height: 10),
-              _PremiumCard(
-                child: Text(
-                  _buildReason(),
-                  style: TextStyle(
-                    color: Colors.grey.shade800,
-                    height: 1.45,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+              _ReasonCard(
+                match: match,
+                breakdown: breakdown,
+                valueInfo: valueInfo,
               ),
               const SizedBox(height: 16),
               const _SectionTitle('Gewinnsimulation'),
@@ -161,10 +136,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                   children: [
                     Text(
                       'Einsatz: ${_stake.toStringAsFixed(0)} €',
-                      style: const TextStyle(
-                        color: Color(0xFF111827),
-                        fontWeight: FontWeight.w900,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.w900),
                     ),
                     Slider(
                       min: 5,
@@ -188,7 +160,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _loading ? null : _toggleSaved,
+                  onPressed: _toggleSaved,
                   icon: Icon(
                     _saved
                         ? Icons.bookmark_remove_rounded
@@ -203,52 +175,34 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       ),
     );
   }
-
-  String _buildReason() {
-    final rawReason = breakdown.reason.trim().isEmpty
-        ? match.shortReason.trim()
-        : breakdown.reason.trim();
-
-    final valueText = valueInfo.isValueBet
-        ? ' Value +${valueInfo.edgePercent.toStringAsFixed(1)}% gegenüber der impliziten Quote.'
-        : '';
-
-    return '${decision.label}: ${decision.reason} Tipp ${match.tipLabel}. Final Score ${topScore.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${topScore.confidence.toStringAsFixed(0)}%, Risiko ${match.riskLevel}.$valueText ${rawReason.isEmpty ? 'Die Bewertung kombiniert Form, Heim/Auswärts-Werte, Tore-Trend, Risiko und Quote.' : rawReason}';
-  }
 }
 
 class _Hero extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
-  final TopTipScore topScore;
-  final _TipDecision decision;
+  final Color scoreColor;
   final _ValueInfo valueInfo;
 
   const _Hero({
     required this.match,
     required this.breakdown,
-    required this.topScore,
-    required this.decision,
+    required this.scoreColor,
     required this.valueInfo,
   });
 
   @override
   Widget build(BuildContext context) {
-    final scoreColor = KickMindTheme.scoreColor(match.aiScore);
-
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF0B2540), Color(0xFF1565C0)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          colors: [Color(0xFF1565C0), Color(0xFF0D47A1)],
         ),
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
             color: KickMindTheme.primary.withOpacity(0.22),
-            blurRadius: 20,
+            blurRadius: 18,
             offset: const Offset(0, 10),
           ),
         ],
@@ -269,11 +223,8 @@ class _Hero extends StatelessWidget {
                   ),
                 ),
               ),
-              _WhiteBadge(text: decision.label),
-              if (valueInfo.isValueBet) ...[
-                const SizedBox(width: 6),
-                const _WhiteBadge(text: 'VALUE'),
-              ],
+              if (valueInfo.isValueBet)
+                _WhiteBadge(text: '💰 VALUE'),
             ],
           ),
           const SizedBox(height: 10),
@@ -294,189 +245,8 @@ class _Hero extends StatelessWidget {
               _WhiteBadge(text: match.kickoffLabel),
               _WhiteBadge(text: 'Tipp ${match.tipLabel}'),
               _WhiteBadge(text: 'AI ${match.aiScore}%'),
-              _WhiteBadge(text: 'Final ${topScore.finalScore.toStringAsFixed(1)}'),
-              _WhiteBadge(text: 'Confidence ${topScore.confidence.toStringAsFixed(0)}%'),
+              _WhiteBadge(text: 'Confidence ${breakdown.confidence}%'),
             ],
-          ),
-          const SizedBox(height: 16),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              value: (topScore.confidence / 100).clamp(0.03, 1.0),
-              minHeight: 10,
-              backgroundColor: Colors.white.withOpacity(0.16),
-              valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-
-class _DecisionCard extends StatelessWidget {
-  final _TipDecision decision;
-
-  const _DecisionCard({required this.decision});
-
-  @override
-  Widget build(BuildContext context) {
-    return _PremiumCard(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: decision.color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(decision.icon, color: decision.color, size: 24),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  decision.title,
-                  style: TextStyle(
-                    color: decision.color,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  decision.reason,
-                  style: const TextStyle(
-                    color: KickMindTheme.textDark,
-                    height: 1.38,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TopTipsScoreCard extends StatelessWidget {
-  final FootballMatch match;
-  final TopTipScore topScore;
-
-  const _TopTipsScoreCard({required this.match, required this.topScore});
-
-  @override
-  Widget build(BuildContext context) {
-    final riskColor = KickMindTheme.riskColor(match.riskLevel);
-
-    return _PremiumCard(
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _ScoreTile(
-                  label: 'Final',
-                  value: topScore.finalScore.toStringAsFixed(1),
-                  icon: Icons.auto_graph_rounded,
-                  color: KickMindTheme.primary,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _ScoreTile(
-                  label: 'Value',
-                  value: '${topScore.valueEdge >= 0 ? '+' : ''}${topScore.valueEdge.toStringAsFixed(1)}%',
-                  icon: Icons.trending_up_rounded,
-                  color: topScore.valueEdge >= 0
-                      ? KickMindTheme.success
-                      : KickMindTheme.danger,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _ScoreTile(
-                  label: 'Risiko',
-                  value: match.riskLevel,
-                  icon: Icons.shield_rounded,
-                  color: riskColor,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _ScoreTile(
-                  label: 'Quote',
-                  value: match.odds.toStringAsFixed(2),
-                  icon: Icons.percent_rounded,
-                  color: Colors.deepPurple,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ScoreTile extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  const _ScoreTile({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withOpacity(0.10)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: KickMindTheme.textMuted,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: color,
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
           ),
         ],
       ),
@@ -487,15 +257,11 @@ class _ScoreTile extends StatelessWidget {
 class _Recommendation extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
-  final TopTipScore topScore;
-  final _TipDecision decision;
   final _ValueInfo valueInfo;
 
   const _Recommendation({
     required this.match,
     required this.breakdown,
-    required this.topScore,
-    required this.decision,
     required this.valueInfo,
   });
 
@@ -506,7 +272,6 @@ class _Recommendation extends StatelessWidget {
 
     return _PremiumCard(
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 76,
@@ -532,12 +297,10 @@ class _Recommendation extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _Badge(text: decision.label, color: decision.color),
                 _Badge(text: '${match.riskEmoji} ${match.riskLevel}', color: riskColor),
-                _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: Colors.deepPurple),
-                _Badge(text: 'AI ${match.aiScore}%', color: KickMindTheme.warning),
-                _Badge(text: 'Final ${topScore.finalScore.toStringAsFixed(1)}', color: KickMindTheme.primary),
-                _Badge(text: 'Confidence ${topScore.confidence.toStringAsFixed(0)}%', color: KickMindTheme.accent),
+                _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: KickMindTheme.primaryDark),
+                _Badge(text: 'Confidence ${breakdown.confidence}%', color: KickMindTheme.accent),
+                _Badge(text: 'Score ${match.aiScore}/100', color: scoreColor),
                 if (valueInfo.isValueBet)
                   _Badge(text: 'Value +${valueInfo.edgePercent.toStringAsFixed(1)}%', color: KickMindTheme.success),
               ],
@@ -545,6 +308,128 @@ class _Recommendation extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+
+class _ReasonCard extends StatelessWidget {
+  final FootballMatch match;
+  final PredictionBreakdown breakdown;
+  final _ValueInfo valueInfo;
+
+  const _ReasonCard({
+    required this.match,
+    required this.breakdown,
+    required this.valueInfo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final reason = breakdown.reason.trim().isEmpty
+        ? match.shortReason.trim()
+        : breakdown.reason.trim();
+
+    final primaryReason = reason.isEmpty
+        ? 'Form, Heim/Auswärts-Werte, Tore-Trend, Risiko und Quote wurden kombiniert bewertet.'
+        : reason;
+
+    return _PremiumCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _ReasonBlock(
+            icon: Icons.check_circle_rounded,
+            title: 'Empfehlung',
+            text:
+            'Tipp ${match.tipLabel} · AI ${match.aiScore}% · Quote ${match.odds.toStringAsFixed(2)}.',
+            color: KickMindTheme.primary,
+          ),
+          const SizedBox(height: 12),
+          _ReasonBlock(
+            icon: Icons.analytics_rounded,
+            title: 'Warum?',
+            text: primaryReason,
+            color: Colors.deepPurple,
+          ),
+          const SizedBox(height: 12),
+          _ReasonBlock(
+            icon: Icons.shield_rounded,
+            title: 'Risiko',
+            text:
+            'Risikostufe ${match.riskLevel}. Tipp nicht isoliert bewerten, sondern mit Quote und Confidence abgleichen.',
+            color: KickMindTheme.riskColor(match.riskLevel),
+          ),
+          if (valueInfo.isValueBet) ...[
+            const SizedBox(height: 12),
+            _ReasonBlock(
+              icon: Icons.trending_up_rounded,
+              title: 'Value',
+              text:
+              'Positiver Edge von +${valueInfo.edgePercent.toStringAsFixed(1)}%. Die AI-Wahrscheinlichkeit liegt über der impliziten Quote.',
+              color: KickMindTheme.success,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ReasonBlock extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String text;
+  final Color color;
+
+  const _ReasonBlock({
+    required this.icon,
+    required this.title,
+    required this.text,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                text,
+                style: TextStyle(
+                  color: Colors.grey.shade800,
+                  height: 1.35,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -562,7 +447,7 @@ class _ValueExplanation extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'VALUE BET gefunden',
+            '💰 VALUE BET gefunden',
             style: TextStyle(
               color: KickMindTheme.success,
               fontSize: 16,
@@ -662,28 +547,17 @@ class _BreakdownBar extends StatelessWidget {
 class _StatsGrid extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
-  final TopTipScore topScore;
 
-  const _StatsGrid({
-    required this.match,
-    required this.breakdown,
-    required this.topScore,
-  });
+  const _StatsGrid({required this.match, required this.breakdown});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         Row(children: [
-          Expanded(child: _StatTile(label: 'AI Score', value: '${match.aiScore}%', icon: Icons.psychology_rounded)),
+          Expanded(child: _StatTile(label: 'AI Score', value: '${match.aiScore}', icon: Icons.psychology_rounded)),
           const SizedBox(width: 10),
-          Expanded(child: _StatTile(label: 'Final Score', value: topScore.finalScore.toStringAsFixed(1), icon: Icons.auto_graph_rounded)),
-        ]),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: _StatTile(label: 'Confidence', value: '${topScore.confidence.toStringAsFixed(0)}%', icon: Icons.verified_rounded)),
-          const SizedBox(width: 10),
-          Expanded(child: _StatTile(label: 'Breakdown', value: '${breakdown.confidence}%', icon: Icons.analytics_rounded)),
+          Expanded(child: _StatTile(label: 'Confidence', value: '${breakdown.confidence}%', icon: Icons.verified_rounded)),
         ]),
         const SizedBox(height: 10),
         Row(children: [
@@ -798,22 +672,12 @@ class _StatTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: KickMindTheme.primary.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: KickMindTheme.primary, size: 19),
-          ),
-          const SizedBox(height: 10),
+          Icon(icon, color: KickMindTheme.primary, size: 20),
+          const SizedBox(height: 8),
           Text(
             label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              color: Color(0xFF6B7280),
+              color: KickMindTheme.textMuted,
               fontSize: 12,
               fontWeight: FontWeight.w800,
             ),
@@ -823,11 +687,7 @@ class _StatTile extends StatelessWidget {
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Color(0xFF111827),
-              fontSize: 21,
-              fontWeight: FontWeight.w900,
-            ),
+            style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
           ),
         ],
       ),
@@ -856,13 +716,7 @@ class _InfoRow extends StatelessWidget {
               ),
             ),
           ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Color(0xFF111827),
-              fontWeight: FontWeight.w900,
-            ),
-          ),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
         ],
       ),
     );
@@ -882,7 +736,7 @@ class _PremiumCard extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.black.withOpacity(0.04)),
         boxShadow: [
           BoxShadow(
@@ -931,7 +785,6 @@ class _WhiteBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.16),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
       ),
       child: Text(
         text,
@@ -954,68 +807,8 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(
-        color: Color(0xFF111827),
-        fontSize: 18,
-        fontWeight: FontWeight.w900,
-      ),
+      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
     );
-  }
-}
-
-
-class _TipDecision {
-  final String label;
-  final String title;
-  final String reason;
-  final Color color;
-  final IconData icon;
-
-  const _TipDecision({
-    required this.label,
-    required this.title,
-    required this.reason,
-    required this.color,
-    required this.icon,
-  });
-
-  factory _TipDecision.fromMatch(FootballMatch match) {
-    final decision = TopTipScoreService.instance.decision(match);
-
-    switch (decision.type) {
-      case TopTipDecisionType.premium:
-        return _TipDecision(
-          label: decision.label,
-          title: decision.title,
-          reason: decision.reason,
-          color: KickMindTheme.primary,
-          icon: Icons.workspace_premium_rounded,
-        );
-      case TopTipDecisionType.value:
-        return _TipDecision(
-          label: decision.label,
-          title: decision.title,
-          reason: decision.reason,
-          color: KickMindTheme.success,
-          icon: Icons.trending_up_rounded,
-        );
-      case TopTipDecisionType.watch:
-        return _TipDecision(
-          label: decision.label,
-          title: decision.title,
-          reason: decision.reason,
-          color: KickMindTheme.accent,
-          icon: Icons.visibility_rounded,
-        );
-      case TopTipDecisionType.noBet:
-        return _TipDecision(
-          label: decision.label,
-          title: decision.title,
-          reason: decision.reason,
-          color: KickMindTheme.danger,
-          icon: Icons.block_rounded,
-        );
-    }
   }
 }
 
@@ -1033,13 +826,24 @@ class _ValueInfo {
   });
 
   factory _ValueInfo.fromMatch(FootballMatch match) {
-    final info = TopTipScoreService.instance.valueInfo(match);
+    if (match.odds <= 1.0) {
+      return const _ValueInfo(
+        isValueBet: false,
+        aiProbabilityPercent: 0,
+        impliedProbabilityPercent: 0,
+        edgePercent: 0,
+      );
+    }
+
+    final aiProbability = (match.aiScore / 100).clamp(0.0, 1.0);
+    final impliedProbability = (1 / match.odds).clamp(0.0, 1.0);
+    final edge = aiProbability - impliedProbability;
 
     return _ValueInfo(
-      isValueBet: info.isValueBet,
-      aiProbabilityPercent: info.aiProbabilityPercent,
-      impliedProbabilityPercent: info.impliedProbabilityPercent,
-      edgePercent: info.edgePercent,
+      isValueBet: match.aiScore >= 70 && edge >= 0.05,
+      aiProbabilityPercent: aiProbability * 100,
+      impliedProbabilityPercent: impliedProbability * 100,
+      edgePercent: edge * 100,
     );
   }
 }
