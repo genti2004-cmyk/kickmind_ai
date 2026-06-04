@@ -1016,7 +1016,6 @@ class _OddsOpportunity {
     final color = _riskColor(risk);
     final decisionColor = _decisionColor(decision);
     final finalReason = _buildFinalReason(
-      decision: decision,
       baseReason: score.reason,
       finalScore: score.finalScore,
       valueEdge: score.valueEdge,
@@ -1050,21 +1049,24 @@ class _OddsOpportunity {
     required String riskLevel,
     required double oddsValue,
   }) {
-    final extremeOdds = oddsValue >= 4.80 || oddsValue <= 1.28;
+    final decision = OddsScoreService.instance.decisionFor(
+      finalScore: finalScore,
+      valueEdge: valueEdge,
+      confidence: confidence,
+      riskLevel: riskLevel,
+      oddsValue: oddsValue,
+    );
 
-    if (riskLevel == 'Hoch' || finalScore < 54 || valueEdge < -2.0 || extremeOdds) {
-      return _OddsDecision.noBet;
+    switch (decision.type) {
+      case OddsMarketDecisionType.premium:
+        return _OddsDecision.premium;
+      case OddsMarketDecisionType.value:
+        return _OddsDecision.value;
+      case OddsMarketDecisionType.stable:
+        return _OddsDecision.stable;
+      case OddsMarketDecisionType.noBet:
+        return _OddsDecision.noBet;
     }
-
-    if (finalScore >= 74 && valueEdge >= 4.0 && confidence >= 68 && riskLevel != 'Hoch') {
-      return _OddsDecision.premium;
-    }
-
-    if (finalScore >= 64 && valueEdge >= 2.0 && confidence >= 58 && riskLevel != 'Hoch') {
-      return _OddsDecision.value;
-    }
-
-    return _OddsDecision.stable;
   }
 
   static Color _decisionColor(_OddsDecision decision) {
@@ -1081,7 +1083,6 @@ class _OddsOpportunity {
   }
 
   static String _buildFinalReason({
-    required _OddsDecision decision,
     required String baseReason,
     required double finalScore,
     required double valueEdge,
@@ -1089,20 +1090,23 @@ class _OddsOpportunity {
     required String riskLevel,
     required double oddsValue,
   }) {
-    final valueText = valueEdge >= 0
-        ? '+${valueEdge.toStringAsFixed(1)} Value'
-        : '${valueEdge.toStringAsFixed(1)} Value';
+    final coreDecision = OddsScoreService.instance.decisionFor(
+      finalScore: finalScore,
+      valueEdge: valueEdge,
+      confidence: confidence,
+      riskLevel: riskLevel,
+      oddsValue: oddsValue,
+    );
 
-    switch (decision) {
-      case _OddsDecision.premium:
-        return 'Premium Value: Final ${finalScore.toStringAsFixed(0)}, $valueText, Konfidenz ${confidence.toStringAsFixed(0)}% und Risiko $riskLevel. $baseReason';
-      case _OddsDecision.value:
-        return 'Value Chance: Die Quote hat eine positive Kante, bleibt aber unter Premium-Niveau. Final ${finalScore.toStringAsFixed(0)}, $valueText, Quote ${oddsValue.toStringAsFixed(2)}. $baseReason';
-      case _OddsDecision.stable:
-        return 'Stabil beobachten: Markt ist nicht schwach, aber der Value reicht noch nicht für einen klaren Einsatz. Final ${finalScore.toStringAsFixed(0)}, $valueText. $baseReason';
-      case _OddsDecision.noBet:
-        return 'No Bet: Quote, Risiko oder Value-Kante sind aktuell nicht sauber genug. Final ${finalScore.toStringAsFixed(0)}, $valueText, Risiko $riskLevel, Quote ${oddsValue.toStringAsFixed(2)}. $baseReason';
-    }
+    return OddsScoreService.instance.finalReason(
+      decision: coreDecision,
+      baseReason: baseReason,
+      finalScore: finalScore,
+      valueEdge: valueEdge,
+      confidence: confidence,
+      riskLevel: riskLevel,
+      oddsValue: oddsValue,
+    );
   }
 
   static Color _riskColor(String label) {

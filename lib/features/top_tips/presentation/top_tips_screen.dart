@@ -199,33 +199,21 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     final noBet = <FootballMatch>[];
 
     for (final match in ranked) {
-      final finalScore = _finalScore(match);
-      final confidence = _confidence(match);
-      final valueEdge = _valueEdge(match);
-      final highRisk = _isHighRisk(match);
-      final oddsExtreme = match.odds >= 4.50;
+      final decision = _scoreService.decision(match);
 
-      final premiumCandidate = finalScore >= 72 &&
-          confidence >= 66 &&
-          match.aiScore >= 68 &&
-          !highRisk &&
-          !oddsExtreme;
-
-      final valueCandidate = valueEdge >= 5.0 &&
-          finalScore >= 64 &&
-          confidence >= 58 &&
-          !highRisk;
-
-      final watchCandidate = finalScore >= 58 && confidence >= 52;
-
-      if (premiumCandidate || _isRecommendedTip(match)) {
-        premium.add(match);
-      } else if (valueCandidate || _isValueBet(match)) {
-        value.add(match);
-      } else if (watchCandidate && !highRisk) {
-        watch.add(match);
-      } else {
-        noBet.add(match);
+      switch (decision.type) {
+        case TopTipDecisionType.premium:
+          premium.add(match);
+          break;
+        case TopTipDecisionType.value:
+          value.add(match);
+          break;
+        case TopTipDecisionType.watch:
+          watch.add(match);
+          break;
+        case TopTipDecisionType.noBet:
+          noBet.add(match);
+          break;
       }
     }
 
@@ -250,30 +238,12 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     return _scoreService.compareByFinalScore(a, b);
   }
 
-  bool _isRecommendedTip(FootballMatch match) {
-    return _scoreService.isRecommendedTip(match);
-  }
-
-  bool _isValueBet(FootballMatch match) {
-    return _scoreService.isValueBet(match);
-  }
-
-  bool _isHighRisk(FootballMatch match) {
-    final risk = match.riskLevel.toLowerCase();
-    return risk.contains('hoch') || risk.contains('high');
-  }
-
   String _statusLabel(FootballMatch match) {
-    final finalScore = _finalScore(match);
-    final valueEdge = _valueEdge(match);
-
-    if (finalScore >= 78 && valueEdge >= 3) return 'Top Tipp';
-    if (valueEdge >= 5) return 'Value Tipp';
-    if (match.riskLevel.toLowerCase().contains('niedrig') ||
-        match.riskLevel.toLowerCase().contains('low')) {
-      return 'Stabil';
-    }
-    return 'Premium';
+    final decision = _scoreService.decision(match);
+    if (decision.type == TopTipDecisionType.premium) return 'Top Tipp';
+    if (decision.type == TopTipDecisionType.value) return 'Value Tipp';
+    if (decision.type == TopTipDecisionType.watch) return 'Stabil';
+    return 'No Bet';
   }
 
   double _finalScore(FootballMatch match) {

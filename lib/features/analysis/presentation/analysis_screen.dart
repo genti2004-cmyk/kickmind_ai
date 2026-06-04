@@ -243,33 +243,21 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     final noBet = <FootballMatch>[];
 
     for (final match in ranked) {
-      final finalScore = _finalScore(match);
-      final confidence = _confidence(match);
-      final valueEdge = _valueEdge(match);
-      final highRisk = _isHighRisk(match);
-      final oddsExtreme = match.odds >= 4.50;
+      final decision = _scoreService.decision(match);
 
-      final premiumCandidate = finalScore >= 72 &&
-          confidence >= 66 &&
-          match.aiScore >= 68 &&
-          !highRisk &&
-          !oddsExtreme;
-
-      final valueCandidate = valueEdge >= 5.0 &&
-          finalScore >= 64 &&
-          confidence >= 58 &&
-          !highRisk;
-
-      final watchCandidate = finalScore >= 58 && confidence >= 52;
-
-      if (premiumCandidate || _isRecommendedTip(match)) {
-        premium.add(match);
-      } else if (valueCandidate || _isValueBet(match)) {
-        value.add(match);
-      } else if (watchCandidate && !highRisk) {
-        watch.add(match);
-      } else {
-        noBet.add(match);
+      switch (decision.type) {
+        case TopTipDecisionType.premium:
+          premium.add(match);
+          break;
+        case TopTipDecisionType.value:
+          value.add(match);
+          break;
+        case TopTipDecisionType.watch:
+          watch.add(match);
+          break;
+        case TopTipDecisionType.noBet:
+          noBet.add(match);
+          break;
       }
     }
 
@@ -282,24 +270,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   String _categoryLabel(FootballMatch match) {
-    final score = _scoreService.score(match);
-    final finalScore = score.finalScore;
-    final confidence = score.confidence;
-    final valueEdge = score.valueEdge;
-    final highRisk = _isHighRisk(match);
-    final oddsExtreme = match.odds >= 4.50;
-
-    if ((finalScore >= 72 && confidence >= 66 && match.aiScore >= 68 && !highRisk && !oddsExtreme) ||
-        score.isRecommended) {
-      return 'Premium';
-    }
-    if ((valueEdge >= 5.0 && finalScore >= 64 && confidence >= 58 && !highRisk) || score.isValueBet) {
-      return 'Value';
-    }
-    if (finalScore >= 58 && confidence >= 52 && !highRisk) {
-      return 'Watch';
-    }
-    return 'No Bet';
+    return _scoreService.decision(match).shortLabel;
   }
 
   Color _categoryColor(FootballMatch match) {
@@ -324,18 +295,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
   int _compareByFinalScore(FootballMatch a, FootballMatch b) {
     return _scoreService.compareByFinalScore(a, b);
-  }
-
-  bool _isRecommendedTip(FootballMatch match) {
-    return _scoreService.isRecommendedTip(match);
-  }
-
-  bool _isValueBet(FootballMatch match) {
-    return _scoreService.isValueBet(match);
-  }
-
-  bool _isHighRisk(FootballMatch match) {
-    return _scoreService.isHighRisk(match);
   }
 
   double _finalScore(FootballMatch match) {

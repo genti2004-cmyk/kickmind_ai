@@ -31,7 +31,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
   );
 
   late final TopTipScore topScore = TopTipScore.fromMatch(match);
-  late final _TipDecision decision = _TipDecision.fromMatch(match, topScore);
+  late final _TipDecision decision = _TipDecision.fromMatch(match);
   late final _ValueInfo valueInfo = _ValueInfo.fromMatch(match);
 
   @override
@@ -947,66 +947,43 @@ class _TipDecision {
     required this.icon,
   });
 
-  factory _TipDecision.fromMatch(FootballMatch match, TopTipScore score) {
-    final finalScore = score.finalScore;
-    final confidence = score.confidence;
-    final valueEdge = score.valueEdge;
-    final highRisk = score.isHighRisk;
-    final oddsExtreme = match.odds >= 4.50 || match.odds < 1.18;
+  factory _TipDecision.fromMatch(FootballMatch match) {
+    final decision = TopTipScoreService.instance.decision(match);
 
-    final premiumCandidate = finalScore >= 72 &&
-        confidence >= 66 &&
-        match.aiScore >= 68 &&
-        !oddsExtreme &&
-        !(highRisk && match.aiScore < 84);
-
-    if (premiumCandidate) {
-      return const _TipDecision(
-        label: 'Premium Tipp',
-        title: 'Premium Tipp bestätigt',
-        reason: 'Die Bewertung ist stark genug: hoher Final Score, ausreichende Confidence, vertretbare Quote und kein blockierendes Risiko.',
-        color: KickMindTheme.primary,
-        icon: Icons.workspace_premium_rounded,
-      );
+    switch (decision.type) {
+      case TopTipDecisionType.premium:
+        return _TipDecision(
+          label: decision.label,
+          title: decision.title,
+          reason: decision.reason,
+          color: KickMindTheme.primary,
+          icon: Icons.workspace_premium_rounded,
+        );
+      case TopTipDecisionType.value:
+        return _TipDecision(
+          label: decision.label,
+          title: decision.title,
+          reason: decision.reason,
+          color: KickMindTheme.success,
+          icon: Icons.trending_up_rounded,
+        );
+      case TopTipDecisionType.watch:
+        return _TipDecision(
+          label: decision.label,
+          title: decision.title,
+          reason: decision.reason,
+          color: KickMindTheme.accent,
+          icon: Icons.visibility_rounded,
+        );
+      case TopTipDecisionType.noBet:
+        return _TipDecision(
+          label: decision.label,
+          title: decision.title,
+          reason: decision.reason,
+          color: KickMindTheme.danger,
+          icon: Icons.block_rounded,
+        );
     }
-
-    final valueCandidate = valueEdge >= 5.0 &&
-        match.aiScore >= 66 &&
-        finalScore >= 62 &&
-        !oddsExtreme;
-
-    if (valueCandidate) {
-      return const _TipDecision(
-        label: 'Value Chance',
-        title: 'Value Chance, aber kein sicherer Premium Tipp',
-        reason: 'Die Quote bietet rechnerischen Value. Trotzdem ist die Gesamtbewertung nicht stark genug, um den Tipp als Premium einzustufen.',
-        color: KickMindTheme.success,
-        icon: Icons.trending_up_rounded,
-      );
-    }
-
-    final noBet = finalScore < 56 ||
-        match.aiScore < 58 ||
-        oddsExtreme ||
-        (highRisk && finalScore < 70);
-
-    if (noBet) {
-      return const _TipDecision(
-        label: 'No Bet',
-        title: 'No Bet empfohlen',
-        reason: 'Der Tipp ist aktuell zu schwach oder zu riskant. Final Score, Quote, Risiko oder AI Score reichen nicht für eine Empfehlung.',
-        color: KickMindTheme.danger,
-        icon: Icons.block_rounded,
-      );
-    }
-
-    return const _TipDecision(
-      label: 'Beobachten',
-      title: 'Beobachten statt sofort spielen',
-      reason: 'Es gibt brauchbare Signale, aber die Kombination aus Score, Risiko und Value ist noch nicht stark genug für Premium.',
-      color: KickMindTheme.accent,
-      icon: Icons.visibility_rounded,
-    );
   }
 }
 

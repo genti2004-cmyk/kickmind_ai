@@ -165,7 +165,7 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
                     match: match,
                     score: score,
                     value: value,
-                    decision: _SavedTipDecision.from(match, score, value),
+                    decision: _SavedTipDecision.from(match),
                     onTap: () => _openDetail(match),
                     onRemove: () => _removeTip(match),
                   );
@@ -735,10 +735,9 @@ class _SavedTipsStats {
     }
 
     final scores = tips.map(TopTipScore.fromMatch).toList();
-    final values = tips.map(_ValueInfo.fromMatch).toList();
     final decisions = <_SavedTipDecision>[];
     for (var i = 0; i < tips.length; i++) {
-      decisions.add(_SavedTipDecision.from(tips[i], scores[i], values[i]));
+      decisions.add(_SavedTipDecision.from(tips[i]));
     }
 
     return _SavedTipsStats(
@@ -772,61 +771,39 @@ class _SavedTipDecision {
     required this.color,
   });
 
-  factory _SavedTipDecision.from(
-      FootballMatch match,
-      TopTipScore score,
-      _ValueInfo value,
-      ) {
-    final risk = match.riskLevel.toLowerCase();
-    final highRisk = risk.contains('hoch') || risk.contains('high');
-    final oddsExtreme = match.odds >= 4.50;
+  factory _SavedTipDecision.from(FootballMatch match) {
+    final decision = TopTipScoreService.instance.decision(match);
 
-    final premiumCandidate = score.finalScore >= 72 &&
-        score.confidence >= 66 &&
-        match.aiScore >= 68 &&
-        !highRisk &&
-        !oddsExtreme;
-
-    final valueCandidate = value.edgePercent >= 5.0 &&
-        score.finalScore >= 64 &&
-        score.confidence >= 58 &&
-        !highRisk;
-
-    final watchCandidate = score.finalScore >= 58 && score.confidence >= 52;
-
-    if (premiumCandidate || score.isRecommended) {
-      return const _SavedTipDecision(
-        type: _SavedTipDecisionType.premium,
-        label: 'Premium Tipp',
-        reason: 'Starke Kombination aus AI Score, Final Score, Risiko und Quote.',
-        color: KickMindTheme.primary,
-      );
+    switch (decision.type) {
+      case TopTipDecisionType.premium:
+        return _SavedTipDecision(
+          type: _SavedTipDecisionType.premium,
+          label: decision.label,
+          reason: decision.reason,
+          color: KickMindTheme.primary,
+        );
+      case TopTipDecisionType.value:
+        return _SavedTipDecision(
+          type: _SavedTipDecisionType.value,
+          label: decision.label,
+          reason: decision.reason,
+          color: KickMindTheme.success,
+        );
+      case TopTipDecisionType.watch:
+        return _SavedTipDecision(
+          type: _SavedTipDecisionType.watch,
+          label: decision.label,
+          reason: decision.reason,
+          color: const Color(0xFF6B7280),
+        );
+      case TopTipDecisionType.noBet:
+        return _SavedTipDecision(
+          type: _SavedTipDecisionType.noBet,
+          label: decision.label,
+          reason: decision.reason,
+          color: KickMindTheme.danger,
+        );
     }
-
-    if (valueCandidate || score.isValueBet || value.isValueBet) {
-      return const _SavedTipDecision(
-        type: _SavedTipDecisionType.value,
-        label: 'Value Chance',
-        reason: 'Die KI-Wahrscheinlichkeit liegt sichtbar über der impliziten Quote.',
-        color: KickMindTheme.success,
-      );
-    }
-
-    if (watchCandidate && !highRisk) {
-      return const _SavedTipDecision(
-        type: _SavedTipDecisionType.watch,
-        label: 'Beobachten',
-        reason: 'Der Tipp ist interessant, aber noch nicht stark genug für Premium.',
-        color: Color(0xFF6B7280),
-      );
-    }
-
-    return const _SavedTipDecision(
-      type: _SavedTipDecisionType.noBet,
-      label: 'No Bet',
-      reason: 'Score, Risiko oder Quote reichen aktuell nicht für eine klare Empfehlung.',
-      color: KickMindTheme.danger,
-    );
   }
 }
 

@@ -55,6 +55,31 @@ class TopTipValueInfo {
   });
 }
 
+
+enum TopTipDecisionType { premium, value, watch, noBet }
+
+class TopTipDecision {
+  final TopTipDecisionType type;
+  final String label;
+  final String shortLabel;
+  final String title;
+  final String reason;
+
+  const TopTipDecision({
+    required this.type,
+    required this.label,
+    required this.shortLabel,
+    required this.title,
+    required this.reason,
+  });
+
+  bool get isPremium => type == TopTipDecisionType.premium;
+  bool get isValue => type == TopTipDecisionType.value;
+  bool get isWatch => type == TopTipDecisionType.watch;
+  bool get isNoBet => type == TopTipDecisionType.noBet;
+}
+
+
 class TopTipScoreService {
   const TopTipScoreService._();
 
@@ -95,6 +120,67 @@ class TopTipScoreService {
       isValueBet: valueBet,
       isHighRisk: highRisk,
       isLowRisk: isLowRisk(match),
+    );
+  }
+
+  TopTipDecision decision(FootballMatch match) {
+    final score = this.score(match);
+    final finalScore = score.finalScore;
+    final confidence = score.confidence;
+    final valueEdge = score.valueEdge;
+    final highRisk = score.isHighRisk;
+    final oddsExtreme = match.odds >= 4.50 || match.odds < 1.18;
+
+    final premiumCandidate = finalScore >= 72 &&
+        confidence >= 66 &&
+        match.aiScore >= 68 &&
+        !oddsExtreme &&
+        !(highRisk && match.aiScore < 84);
+
+    if (premiumCandidate || score.isRecommended) {
+      return const TopTipDecision(
+        type: TopTipDecisionType.premium,
+        label: 'Premium Tipp',
+        shortLabel: 'Premium',
+        title: 'Premium Tipp bestätigt',
+        reason: 'Starke Kombination aus AI Score, Final Score, Risiko und Quote.',
+      );
+    }
+
+    final valueCandidate = valueEdge >= 5.0 &&
+        finalScore >= 64 &&
+        confidence >= 58 &&
+        !highRisk &&
+        !oddsExtreme;
+
+    if (valueCandidate || score.isValueBet) {
+      return const TopTipDecision(
+        type: TopTipDecisionType.value,
+        label: 'Value Chance',
+        shortLabel: 'Value',
+        title: 'Value Chance, aber kein sicherer Premium Tipp',
+        reason: 'Die KI-Wahrscheinlichkeit liegt sichtbar über der impliziten Quote.',
+      );
+    }
+
+    final watchCandidate = finalScore >= 58 && confidence >= 52 && !highRisk;
+
+    if (watchCandidate) {
+      return const TopTipDecision(
+        type: TopTipDecisionType.watch,
+        label: 'Beobachten',
+        shortLabel: 'Watch',
+        title: 'Beobachten statt sofort spielen',
+        reason: 'Der Tipp ist interessant, aber noch nicht stark genug für Premium.',
+      );
+    }
+
+    return const TopTipDecision(
+      type: TopTipDecisionType.noBet,
+      label: 'No Bet',
+      shortLabel: 'No Bet',
+      title: 'No Bet empfohlen',
+      reason: 'Score, Risiko oder Quote reichen aktuell nicht für eine klare Empfehlung.',
     );
   }
 

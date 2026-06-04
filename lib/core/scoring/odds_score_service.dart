@@ -27,6 +27,27 @@ class OddsMarketScore {
   });
 }
 
+
+enum OddsMarketDecisionType { premium, value, stable, noBet }
+
+class OddsMarketDecision {
+  final OddsMarketDecisionType type;
+  final String label;
+  final String explanation;
+
+  const OddsMarketDecision({
+    required this.type,
+    required this.label,
+    required this.explanation,
+  });
+
+  bool get isPremium => type == OddsMarketDecisionType.premium;
+  bool get isValue => type == OddsMarketDecisionType.value;
+  bool get isStable => type == OddsMarketDecisionType.stable;
+  bool get isNoBet => type == OddsMarketDecisionType.noBet;
+}
+
+
 class OddsScoreService {
   const OddsScoreService._();
 
@@ -68,6 +89,71 @@ class OddsScoreService {
         margin: margin,
       ),
     );
+  }
+
+  OddsMarketDecision decisionFor({
+    required double finalScore,
+    required double valueEdge,
+    required double confidence,
+    required String riskLevel,
+    required double oddsValue,
+  }) {
+    final extremeOdds = oddsValue >= 4.80 || oddsValue <= 1.28;
+
+    if (riskLevel == 'Hoch' || finalScore < 54 || valueEdge < -2.0 || extremeOdds) {
+      return const OddsMarketDecision(
+        type: OddsMarketDecisionType.noBet,
+        label: 'No Bet',
+        explanation: 'Risiko oder Value passt aktuell nicht.',
+      );
+    }
+
+    if (finalScore >= 74 && valueEdge >= 4.0 && confidence >= 68 && riskLevel != 'Hoch') {
+      return const OddsMarketDecision(
+        type: OddsMarketDecisionType.premium,
+        label: 'Premium Value',
+        explanation: 'Starker Markt mit Score, Value und Risiko im grünen Bereich.',
+      );
+    }
+
+    if (finalScore >= 64 && valueEdge >= 2.0 && confidence >= 58 && riskLevel != 'Hoch') {
+      return const OddsMarketDecision(
+        type: OddsMarketDecisionType.value,
+        label: 'Value Chance',
+        explanation: 'Positive Value-Kante, aber noch nicht ganz Premium.',
+      );
+    }
+
+    return const OddsMarketDecision(
+      type: OddsMarketDecisionType.stable,
+      label: 'Stabil beobachten',
+      explanation: 'Solide Quote, aber noch kein klarer Value-Markt.',
+    );
+  }
+
+  String finalReason({
+    required OddsMarketDecision decision,
+    required String baseReason,
+    required double finalScore,
+    required double valueEdge,
+    required double confidence,
+    required String riskLevel,
+    required double oddsValue,
+  }) {
+    final valueText = valueEdge >= 0
+        ? '+${valueEdge.toStringAsFixed(1)} Value'
+        : '${valueEdge.toStringAsFixed(1)} Value';
+
+    switch (decision.type) {
+      case OddsMarketDecisionType.premium:
+        return 'Premium Value: Final ${finalScore.toStringAsFixed(0)}, $valueText, Konfidenz ${confidence.toStringAsFixed(0)}% und Risiko $riskLevel. $baseReason';
+      case OddsMarketDecisionType.value:
+        return 'Value Chance: Die Quote hat eine positive Kante, bleibt aber unter Premium-Niveau. Final ${finalScore.toStringAsFixed(0)}, $valueText, Quote ${oddsValue.toStringAsFixed(2)}. $baseReason';
+      case OddsMarketDecisionType.stable:
+        return 'Stabil beobachten: Markt ist nicht schwach, aber der Value reicht noch nicht für einen klaren Einsatz. Final ${finalScore.toStringAsFixed(0)}, $valueText. $baseReason';
+      case OddsMarketDecisionType.noBet:
+        return 'No Bet: Quote, Risiko oder Value-Kante sind aktuell nicht sauber genug. Final ${finalScore.toStringAsFixed(0)}, $valueText, Risiko $riskLevel, Quote ${oddsValue.toStringAsFixed(2)}. $baseReason';
+    }
   }
 
   double _oddsQuality(double value) {
