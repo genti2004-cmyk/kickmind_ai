@@ -102,6 +102,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                   rangeLabel: _range.label,
                   matchesCount: ranked.length,
                   premiumCount: buckets.premium.length,
+                  valueCount: buckets.value.length,
                   watchCount: buckets.watch.length,
                   noBetCount: buckets.noBet.length,
                   bestMatch: ranked.first,
@@ -238,7 +239,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     );
   }
 
-
   _AnalysisBuckets _buildBuckets(List<FootballMatch> ranked) {
     final premium = <FootballMatch>[];
     final value = <FootballMatch>[];
@@ -277,14 +277,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   Color _categoryColor(FootballMatch match) {
-    switch (_categoryLabel(match)) {
-      case 'Premium':
+    switch (_scoreService.decision(match).type) {
+      case TopTipDecisionType.premium:
         return KickMindTheme.primary;
-      case 'Value':
+      case TopTipDecisionType.value:
         return KickMindTheme.success;
-      case 'Watch':
+      case TopTipDecisionType.watch:
         return KickMindTheme.primaryDark;
-      default:
+      case TopTipDecisionType.noBet:
         return KickMindTheme.danger;
     }
   }
@@ -299,6 +299,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   int _compareByFinalScore(FootballMatch a, FootballMatch b) {
     return _scoreService.compareByFinalScore(a, b);
   }
+
+
+
+
 
   double _finalScore(FootballMatch match) {
     return _scoreService.score(match).finalScore;
@@ -387,6 +391,7 @@ class _AnalysisHero extends StatelessWidget {
   final String rangeLabel;
   final int matchesCount;
   final int premiumCount;
+  final int valueCount;
   final int watchCount;
   final int noBetCount;
   final FootballMatch bestMatch;
@@ -398,6 +403,7 @@ class _AnalysisHero extends StatelessWidget {
     required this.rangeLabel,
     required this.matchesCount,
     required this.premiumCount,
+    required this.valueCount,
     required this.watchCount,
     required this.noBetCount,
     required this.bestMatch,
@@ -408,10 +414,6 @@ class _AnalysisHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final subtitle = premiumCount > 0
-        ? '$matchesCount Spiele analysiert · $premiumCount Premium · $watchCount Beobachten'
-        : '$matchesCount Spiele analysiert · $watchCount Beobachten · $noBetCount Risiko/No Bet';
-
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -454,7 +456,7 @@ class _AnalysisHero extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      subtitle,
+                      '$matchesCount Spiele analysiert · $premiumCount Premium · $valueCount Value · $watchCount Beobachten · $noBetCount Risiko',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.78),
                         fontWeight: FontWeight.w800,
@@ -482,9 +484,9 @@ class _AnalysisHero extends StatelessWidget {
             runSpacing: 8,
             children: [
               _HeroPill(label: 'Final ${bestFinalScore.toStringAsFixed(1)}'),
-              _HeroPill(label: 'Ø Final ${avgFinalScore.toStringAsFixed(1)}'),
               _HeroPill(label: 'AI ${bestMatch.aiScore}%'),
               _HeroPill(label: 'Value ${bestValueEdge >= 0 ? '+' : ''}${bestValueEdge.toStringAsFixed(1)}%'),
+              _HeroPill(label: 'Ø Final ${avgFinalScore.toStringAsFixed(1)}'),
             ],
           ),
         ],
@@ -798,7 +800,7 @@ class _CompactAnalysisTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _SimpleInfoTile(
-      icon: Icons.trending_up_rounded,
+      icon: statusLabel == 'Watch' ? Icons.visibility_rounded : Icons.trending_up_rounded,
       iconColor: statusColor,
       title: match.teamsLabel,
       subtitle: '$statusLabel · ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge >= 0 ? '+' : ''}${valueEdge.toStringAsFixed(1)}%',
