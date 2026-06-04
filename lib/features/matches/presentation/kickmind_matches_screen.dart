@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/core/scoring/top_tip_score_service.dart';
 import 'package:kickmind_ai/core/theme/kickmind_theme.dart';
 import 'package:kickmind_ai/features/filters/presentation/filter_screen.dart';
 import 'package:kickmind_ai/features/matches/data/repositories/match_repository_impl.dart';
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/matches/domain/match_date_range.dart';
 import 'package:kickmind_ai/features/matches/presentation/widgets/match_card.dart';
+import 'package:kickmind_ai/features/top_tips/presentation/top_tips_screen.dart';
 import 'package:kickmind_ai/features/matches/presentation/match_detail_screen.dart';
-import 'package:kickmind_ai/features/predictions/domain/prediction_engine.dart';
 
 class KickMindMatchesScreen extends StatefulWidget {
   const KickMindMatchesScreen({super.key});
@@ -17,7 +18,7 @@ class KickMindMatchesScreen extends StatefulWidget {
 
 class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
   final MatchRepositoryImpl _repo = MatchRepositoryImpl();
-  final PredictionEngine _engine = const PredictionEngine();
+  final TopTipScoreService _scoreService = TopTipScoreService.instance;
 
   MatchDateRange _range = MatchDateRange.today;
   FilterResult? _activeFilter;
@@ -109,11 +110,20 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
             final loading = snapshot.connectionState == ConnectionState.waiting;
             final rawMatches = snapshot.data ?? <FootballMatch>[];
             final matches = _applyFilter(rawMatches);
-            final topTips = _engine.rankTopTips(matches, limit: 5);
-            final topPick = topTips.isNotEmpty ? topTips.first : null;
-            final valuePick = _bestValuePick(matches);
-            final strongCount = matches.where((m) => m.aiScore >= 80 && m.riskLevel.toLowerCase() != 'hoch').length;
-            final avgAi = matches.isEmpty ? 0 : (matches.fold<int>(0, (sum, m) => sum + m.aiScore) / matches.length).round();
+            final rankedMatches = [...matches]..sort(_scoreService.compareByFinalScore);
+            final premiumTips = rankedMatches.where((m) => _scoreService.score(m).isRecommended).toList();
+            final valueTips = rankedMatches.where((m) {
+              final score = _scoreService.score(m);
+              return score.isValueBet && !score.isRecommended && !score.isNoBet;
+            }).toList();
+            final visibleTopTips = rankedMatches.where((m) => !_scoreService.score(m).isNoBet).take(5).toList();
+            final topPick = premiumTips.isNotEmpty ? premiumTips.first : null;
+            final valuePick = valueTips.isNotEmpty ? valueTips.first : _bestValuePick(matches);
+            final strongCount = premiumTips.length;
+            final valueCount = rankedMatches.where((m) => _scoreService.score(m).isValueBet).length;
+            final avgFinal = matches.isEmpty
+                ? 0
+                : (matches.fold<double>(0, (sum, m) => sum + _scoreService.score(m).finalScore) / matches.length).round();
 
             if (loading) {
               return const _LoadingState();
@@ -127,9 +137,11 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                   _StartHero(
                     rangeLabel: _range.label,
                     matchCount: matches.length,
-                    avgAi: avgAi,
+                    avgFinal: avgFinal,
                     strongCount: strongCount,
+                    valueCount: valueCount,
                     onFilterTap: () => _openFilter(rawMatches),
+                    onTopTipsTap: _openTopTips,
                   ),
                   const SizedBox(height: 14),
 
@@ -147,8 +159,8 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
 
                   if (topPick != null) ...[
                     _SectionHeader(
-                      title: '🔥 Heute Top Pick',
-                      subtitle: 'Der stärkste Tipp aus deiner aktuellen Auswahl',
+                      title: '🔥 Premium Top Pick',
+                      subtitle: 'Nur Tipps mit finaler zentraler Bewertung',
                       actionLabel: 'Details',
                       onActionTap: () => _openDetail(topPick),
                     ),
@@ -158,8 +170,8 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                       icon: Icons.local_fire_department_rounded,
                       title: 'Top Pick',
                       accentColor: KickMindTheme.scoreColor(topPick.aiScore),
-                      badgeText: '${topPick.tipLabel} · AI ${topPick.aiScore}%',
-                      footerText: topPick.shortReason,
+                      badgeText: _decisionLabel(topPick),
+                      footerText: _decisionReason(topPick),
                       onTap: () => _openDetail(topPick),
                     ),
                     const SizedBox(height: 18),
@@ -178,8 +190,8 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                       icon: Icons.attach_money_rounded,
                       title: 'Value Chance',
                       accentColor: KickMindTheme.success,
-                      badgeText: _valueLabel(valuePick),
-                      footerText: 'AI ${(valuePick.aiScore).toString()}% vs. Quote ${valuePick.odds.toStringAsFixed(2)}',
+                      badgeText: _decisionLabel(valuePick),
+                      footerText: _decisionReason(valuePick),
                       onTap: () => _openDetail(valuePick),
                     ),
                     const SizedBox(height: 18),
@@ -187,22 +199,23 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
 
                   _QuickStatsGrid(
                     matchCount: matches.length,
-                    avgAi: avgAi,
                     strongCount: strongCount,
-                    valueCount: matches.where(_isValueCandidate).length,
+                    valueCount: valueCount,
                   ),
                   const SizedBox(height: 18),
 
-                  if (topTips.isNotEmpty) ...[
-                    const _SectionHeader(
-                      title: 'Top Tipps heute',
-                      subtitle: 'Kompakte Auswahl mit AI, Risiko und Quote',
+                  if (visibleTopTips.isNotEmpty) ...[
+                    _SectionHeader(
+                      title: 'Top 3 Premium-Auswahl',
+                      subtitle: 'Zentrale Final-Score-Logik aus TopTipScoreService',
+                      actionLabel: 'Alle',
+                      onActionTap: _openTopTips,
                     ),
                     const SizedBox(height: 10),
-                    ...topTips.take(3).map(
+                    ...visibleTopTips.take(3).map(
                           (m) => _TopTipMiniCard(
                         match: m,
-                        valueCandidate: _isValueCandidate(m),
+                        score: _scoreService.score(m),
                         onTap: () => _openDetail(m),
                       ),
                     ),
@@ -224,7 +237,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                           (match) => MatchCard(
                         match: match,
                         onTap: () => _openDetail(match),
-                        trailing: _isValueCandidate(match)
+                        trailing: _scoreService.score(match).isValueBet
                             ? const _MiniValueBadge()
                             : null,
                       ),
@@ -245,6 +258,13 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
     );
   }
 
+  void _openTopTips() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const TopTipsScreen()),
+    );
+  }
+
   FootballMatch? _bestValuePick(List<FootballMatch> matches) {
     final candidates = matches.where(_isValueCandidate).toList()
       ..sort((a, b) => _valueEdge(b).compareTo(_valueEdge(a)));
@@ -252,38 +272,44 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
   }
 
   bool _isValueCandidate(FootballMatch match) {
-    if (match.odds <= 1.01) return false;
-    final aiProbability = match.aiScore / 100.0;
-    final impliedProbability = 1.0 / match.odds;
-    return aiProbability > impliedProbability && match.aiScore >= 70;
+    return _scoreService.score(match).isValueBet;
   }
 
   double _valueEdge(FootballMatch match) {
-    if (match.odds <= 1.01) return 0;
-    final aiProbability = match.aiScore / 100.0;
-    final impliedProbability = 1.0 / match.odds;
-    return (aiProbability - impliedProbability) * 100;
+    return _scoreService.calculateValueEdge(match);
   }
 
-  String _valueLabel(FootballMatch match) {
-    final edge = _valueEdge(match);
-    return 'Edge +${edge.toStringAsFixed(1)}%';
+  String _decisionLabel(FootballMatch match) {
+    final score = _scoreService.score(match);
+    return '${score.recommendationLabel} · Final ${score.finalScore.toStringAsFixed(0)}';
+  }
+
+  String _decisionReason(FootballMatch match) {
+    final score = _scoreService.score(match);
+    final edgeText = score.valueEdge >= 0
+        ? '+${score.valueEdge.toStringAsFixed(1)}%'
+        : '${score.valueEdge.toStringAsFixed(1)}%';
+    return '${score.recommendationLabel}: AI ${match.aiScore}% · Value Edge $edgeText · Risiko ${match.riskLevel} · Quote ${match.odds.toStringAsFixed(2)}';
   }
 }
 
 class _StartHero extends StatelessWidget {
   final String rangeLabel;
   final int matchCount;
-  final int avgAi;
+  final int avgFinal;
   final int strongCount;
+  final int valueCount;
   final VoidCallback onFilterTap;
+  final VoidCallback onTopTipsTap;
 
   const _StartHero({
     required this.rangeLabel,
     required this.matchCount,
-    required this.avgAi,
+    required this.avgFinal,
     required this.strongCount,
+    required this.valueCount,
     required this.onFilterTap,
+    required this.onTopTipsTap,
   });
 
   @override
@@ -325,12 +351,12 @@ class _StartHero extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'KickMind AI Analyse',
+                      'KickMind AI Radar',
                       style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$rangeLabel · $matchCount Spiele · Ø AI $avgAi%',
+                      '$rangeLabel · $matchCount Spiele · Ø Final $avgFinal',
                       style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700),
                     ),
                   ],
@@ -349,12 +375,26 @@ class _StartHero extends StatelessWidget {
           const SizedBox(height: 18),
           Row(
             children: [
-              Expanded(child: _HeroMetric(label: 'Spiele', value: '$matchCount')),
+              Expanded(child: _HeroMetric(label: 'Premium', value: '$strongCount')),
               const SizedBox(width: 10),
-              Expanded(child: _HeroMetric(label: 'Ø AI', value: '$avgAi%')),
+              Expanded(child: _HeroMetric(label: 'Value', value: '$valueCount')),
               const SizedBox(width: 10),
-              Expanded(child: _HeroMetric(label: 'Stark', value: '$strongCount')),
+              Expanded(child: _HeroMetric(label: 'Ø Final', value: '$avgFinal')),
             ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onTopTipsTap,
+              icon: const Icon(Icons.emoji_events_rounded),
+              label: const Text('Alle Top Tipps öffnen'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: KickMindTheme.primary,
+                textStyle: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
           ),
         ],
       ),
@@ -457,13 +497,11 @@ class _ActiveFilterBanner extends StatelessWidget {
 
 class _QuickStatsGrid extends StatelessWidget {
   final int matchCount;
-  final int avgAi;
   final int strongCount;
   final int valueCount;
 
   const _QuickStatsGrid({
     required this.matchCount,
-    required this.avgAi,
     required this.strongCount,
     required this.valueCount,
   });
@@ -474,7 +512,7 @@ class _QuickStatsGrid extends StatelessWidget {
       children: [
         Expanded(child: _StatCard(label: 'Spiele', value: '$matchCount', icon: Icons.sports_soccer_rounded, color: KickMindTheme.primary)),
         const SizedBox(width: 10),
-        Expanded(child: _StatCard(label: 'Ø AI', value: '$avgAi%', icon: Icons.auto_graph_rounded, color: KickMindTheme.accent)),
+        Expanded(child: _StatCard(label: 'Premium', value: '$strongCount', icon: Icons.emoji_events_rounded, color: KickMindTheme.accent)),
         const SizedBox(width: 10),
         Expanded(child: _StatCard(label: 'Value', value: '$valueCount', icon: Icons.attach_money_rounded, color: KickMindTheme.success)),
       ],
@@ -593,14 +631,14 @@ class _HighlightCard extends StatelessWidget {
 
 class _TopTipMiniCard extends StatelessWidget {
   final FootballMatch match;
-  final bool valueCandidate;
+  final TopTipScore score;
   final VoidCallback onTap;
 
-  const _TopTipMiniCard({required this.match, required this.valueCandidate, required this.onTap});
+  const _TopTipMiniCard({required this.match, required this.score, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final color = KickMindTheme.scoreColor(match.aiScore);
+    final color = _categoryColor(score);
 
     return InkWell(
       onTap: onTap,
@@ -617,18 +655,32 @@ class _TopTipMiniCard extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                '${valueCandidate ? '💰 ' : ''}${match.teamsLabel}',
+                '${score.isValueBet ? '💰 ' : ''}${match.teamsLabel}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
               ),
             ),
             const SizedBox(width: 8),
-            Text('${match.tipLabel} • AI ${match.aiScore}', style: TextStyle(color: color, fontWeight: FontWeight.w900)),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(score.recommendationLabel, style: TextStyle(color: color, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 2),
+                Text('Final ${score.finalScore.toStringAsFixed(0)}', style: const TextStyle(color: KickMindTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w800)),
+              ],
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Color _categoryColor(TopTipScore score) {
+    if (score.isRecommended) return KickMindTheme.success;
+    if (score.isValueBet) return KickMindTheme.accent;
+    if (score.isNoBet) return KickMindTheme.danger;
+    return KickMindTheme.warning;
   }
 }
 
