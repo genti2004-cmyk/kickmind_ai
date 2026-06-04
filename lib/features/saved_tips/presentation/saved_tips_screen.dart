@@ -25,9 +25,7 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
   Future<List<FootballMatch>> _load() async {
     final tips = await _service.loadSavedTips();
     tips.sort((a, b) {
-      final scoreCompare = TopTipScore.fromMatch(b)
-          .finalScore
-          .compareTo(TopTipScore.fromMatch(a).finalScore);
+      final scoreCompare = TopTipScoreService.instance.compareByFinalScore(a, b);
       if (scoreCompare != 0) return scoreCompare;
       return b.kickoff.compareTo(a.kickoff);
     });
@@ -156,19 +154,22 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
                 const SizedBox(height: 18),
                 const _SectionTitle(
                   icon: Icons.bookmark_rounded,
-                  title: 'Gespeicherte Top Tipps',
-                  subtitle: 'Sortiert nach Final Score und Kickoff.',
+                  title: 'Gespeicherte Tipps',
+                  subtitle: 'Mit derselben Premium / Value / No-Bet Logik wie Top Tipps.',
                 ),
                 const SizedBox(height: 12),
-                ...tips.map(
-                      (match) => _SavedTipCard(
+                ...tips.map((match) {
+                  final score = TopTipScore.fromMatch(match);
+                  final value = _ValueInfo.fromMatch(match);
+                  return _SavedTipCard(
                     match: match,
-                    score: TopTipScore.fromMatch(match),
-                    value: _ValueInfo.fromMatch(match),
+                    score: score,
+                    value: value,
+                    decision: _SavedTipDecision.from(match, score, value),
                     onTap: () => _openDetail(match),
                     onRemove: () => _removeTip(match),
-                  ),
-                ),
+                  );
+                }),
               ],
             ),
           );
@@ -251,6 +252,13 @@ class _SavedSummary extends StatelessWidget {
             children: [
               Expanded(
                 child: _SummaryTile(
+                  label: 'Premium',
+                  value: '${stats.premiumCount}',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SummaryTile(
                   label: 'Value',
                   value: '${stats.valueCount}',
                 ),
@@ -258,15 +266,8 @@ class _SavedSummary extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: _SummaryTile(
-                  label: 'Ø Quote',
-                  value: stats.averageOdds.toStringAsFixed(2),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _SummaryTile(
-                  label: 'Top',
-                  value: stats.bestFinal.toStringAsFixed(1),
+                  label: 'No Bet',
+                  value: '${stats.noBetCount}',
                 ),
               ),
             ],
@@ -326,6 +327,7 @@ class _SavedTipCard extends StatelessWidget {
   final FootballMatch match;
   final TopTipScore score;
   final _ValueInfo value;
+  final _SavedTipDecision decision;
   final VoidCallback onTap;
   final VoidCallback onRemove;
 
@@ -333,6 +335,7 @@ class _SavedTipCard extends StatelessWidget {
     required this.match,
     required this.score,
     required this.value,
+    required this.decision,
     required this.onTap,
     required this.onRemove,
   });
@@ -433,6 +436,11 @@ class _SavedTipCard extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   _MetricChip(
+                    text: decision.label,
+                    color: decision.color,
+                    background: decision.color.withOpacity(0.10),
+                  ),
+                  _MetricChip(
                     text: match.tipLabel,
                     color: KickMindTheme.primary,
                     background: KickMindTheme.primary.withOpacity(0.10),
@@ -497,7 +505,7 @@ class _SavedTipCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                _reasonText(match, score, value),
+                _reasonText(match, score, value, decision),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -526,13 +534,14 @@ class _SavedTipCard extends StatelessWidget {
       FootballMatch match,
       TopTipScore score,
       _ValueInfo value,
+      _SavedTipDecision decision,
       ) {
     final valueText = value.isValueBet
         ? ' Value +${value.edgePercent.toStringAsFixed(1)}%.'
         : '';
 
     final reason = match.shortReason.trim();
-    return '${match.tipLabel} gespeichert. Final ${score.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${score.confidence.toStringAsFixed(0)}%, Risiko ${match.riskLevel}.$valueText ${reason.isEmpty ? 'Bewertung basiert auf Form, Quote, Risiko und Tore-Trend.' : reason}';
+    return '${decision.label}: ${match.tipLabel} gespeichert. Final ${score.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${score.confidence.toStringAsFixed(0)}%, Risiko ${match.riskLevel}.$valueText ${reason.isEmpty ? decision.reason : reason}';
   }
 }
 
@@ -693,7 +702,10 @@ class _SavedTipsStats {
   final double averageFinal;
   final double averageOdds;
   final double bestFinal;
+  final int premiumCount;
   final int valueCount;
+  final int watchCount;
+  final int noBetCount;
 
   const _SavedTipsStats({
     required this.count,
@@ -701,7 +713,10 @@ class _SavedTipsStats {
     required this.averageFinal,
     required this.averageOdds,
     required this.bestFinal,
+    required this.premiumCount,
     required this.valueCount,
+    required this.watchCount,
+    required this.noBetCount,
   });
 
   factory _SavedTipsStats.fromTips(List<FootballMatch> tips) {
@@ -712,12 +727,19 @@ class _SavedTipsStats {
         averageFinal: 0,
         averageOdds: 0,
         bestFinal: 0,
+        premiumCount: 0,
         valueCount: 0,
+        watchCount: 0,
+        noBetCount: 0,
       );
     }
 
     final scores = tips.map(TopTipScore.fromMatch).toList();
     final values = tips.map(_ValueInfo.fromMatch).toList();
+    final decisions = <_SavedTipDecision>[];
+    for (var i = 0; i < tips.length; i++) {
+      decisions.add(_SavedTipDecision.from(tips[i], scores[i], values[i]));
+    }
 
     return _SavedTipsStats(
       count: tips.length,
@@ -726,7 +748,84 @@ class _SavedTipsStats {
       scores.map((s) => s.finalScore).reduce((a, b) => a + b) / scores.length,
       averageOdds: tips.map((m) => m.odds).reduce((a, b) => a + b) / tips.length,
       bestFinal: scores.map((s) => s.finalScore).reduce((a, b) => a > b ? a : b),
-      valueCount: values.where((v) => v.isValueBet).length,
+      premiumCount: decisions.where((d) => d.type == _SavedTipDecisionType.premium).length,
+      valueCount: decisions.where((d) => d.type == _SavedTipDecisionType.value).length,
+      watchCount: decisions.where((d) => d.type == _SavedTipDecisionType.watch).length,
+      noBetCount: decisions.where((d) => d.type == _SavedTipDecisionType.noBet).length,
+    );
+  }
+}
+
+
+enum _SavedTipDecisionType { premium, value, watch, noBet }
+
+class _SavedTipDecision {
+  final _SavedTipDecisionType type;
+  final String label;
+  final String reason;
+  final Color color;
+
+  const _SavedTipDecision({
+    required this.type,
+    required this.label,
+    required this.reason,
+    required this.color,
+  });
+
+  factory _SavedTipDecision.from(
+      FootballMatch match,
+      TopTipScore score,
+      _ValueInfo value,
+      ) {
+    final risk = match.riskLevel.toLowerCase();
+    final highRisk = risk.contains('hoch') || risk.contains('high');
+    final oddsExtreme = match.odds >= 4.50;
+
+    final premiumCandidate = score.finalScore >= 72 &&
+        score.confidence >= 66 &&
+        match.aiScore >= 68 &&
+        !highRisk &&
+        !oddsExtreme;
+
+    final valueCandidate = value.edgePercent >= 5.0 &&
+        score.finalScore >= 64 &&
+        score.confidence >= 58 &&
+        !highRisk;
+
+    final watchCandidate = score.finalScore >= 58 && score.confidence >= 52;
+
+    if (premiumCandidate || score.isRecommended) {
+      return const _SavedTipDecision(
+        type: _SavedTipDecisionType.premium,
+        label: 'Premium Tipp',
+        reason: 'Starke Kombination aus AI Score, Final Score, Risiko und Quote.',
+        color: KickMindTheme.primary,
+      );
+    }
+
+    if (valueCandidate || score.isValueBet || value.isValueBet) {
+      return const _SavedTipDecision(
+        type: _SavedTipDecisionType.value,
+        label: 'Value Chance',
+        reason: 'Die KI-Wahrscheinlichkeit liegt sichtbar über der impliziten Quote.',
+        color: KickMindTheme.success,
+      );
+    }
+
+    if (watchCandidate && !highRisk) {
+      return const _SavedTipDecision(
+        type: _SavedTipDecisionType.watch,
+        label: 'Beobachten',
+        reason: 'Der Tipp ist interessant, aber noch nicht stark genug für Premium.',
+        color: Color(0xFF6B7280),
+      );
+    }
+
+    return const _SavedTipDecision(
+      type: _SavedTipDecisionType.noBet,
+      label: 'No Bet',
+      reason: 'Score, Risiko oder Quote reichen aktuell nicht für eine klare Empfehlung.',
+      color: KickMindTheme.danger,
     );
   }
 }

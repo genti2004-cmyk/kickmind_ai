@@ -31,6 +31,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
   );
 
   late final TopTipScore topScore = TopTipScore.fromMatch(match);
+  late final _TipDecision decision = _TipDecision.fromMatch(match, topScore);
   late final _ValueInfo valueInfo = _ValueInfo.fromMatch(match);
 
   @override
@@ -94,8 +95,13 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                 match: match,
                 breakdown: breakdown,
                 topScore: topScore,
+                decision: decision,
                 valueInfo: valueInfo,
               ),
+              const SizedBox(height: 16),
+              const _SectionTitle('Finale Entscheidung'),
+              const SizedBox(height: 10),
+              _DecisionCard(decision: decision),
               const SizedBox(height: 16),
               const _SectionTitle('Top-Tipps Bewertung'),
               const SizedBox(height: 10),
@@ -107,6 +113,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                 match: match,
                 breakdown: breakdown,
                 topScore: topScore,
+                decision: decision,
                 valueInfo: valueInfo,
               ),
               const SizedBox(height: 16),
@@ -198,7 +205,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
         ? ' Value +${valueInfo.edgePercent.toStringAsFixed(1)}% gegenüber der impliziten Quote.'
         : '';
 
-    return '${match.tipLabel} empfohlen. Final Score ${topScore.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${topScore.confidence.toStringAsFixed(0)}%, Risiko ${match.riskLevel}.$valueText ${rawReason.isEmpty ? 'Die Bewertung kombiniert Form, Heim/Auswärts-Werte, Tore-Trend, Risiko und Quote.' : rawReason}';
+    return '${decision.label}: ${decision.reason} Tipp ${match.tipLabel}. Final Score ${topScore.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${topScore.confidence.toStringAsFixed(0)}%, Risiko ${match.riskLevel}.$valueText ${rawReason.isEmpty ? 'Die Bewertung kombiniert Form, Heim/Auswärts-Werte, Tore-Trend, Risiko und Quote.' : rawReason}';
   }
 }
 
@@ -206,12 +213,14 @@ class _Hero extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
   final TopTipScore topScore;
+  final _TipDecision decision;
   final _ValueInfo valueInfo;
 
   const _Hero({
     required this.match,
     required this.breakdown,
     required this.topScore,
+    required this.decision,
     required this.valueInfo,
   });
 
@@ -252,7 +261,11 @@ class _Hero extends StatelessWidget {
                   ),
                 ),
               ),
-              if (valueInfo.isValueBet) const _WhiteBadge(text: 'VALUE'),
+              _WhiteBadge(text: decision.label),
+              if (valueInfo.isValueBet) ...[
+                const SizedBox(width: 6),
+                const _WhiteBadge(text: 'VALUE'),
+              ],
             ],
           ),
           const SizedBox(height: 10),
@@ -285,6 +298,58 @@ class _Hero extends StatelessWidget {
               minHeight: 10,
               backgroundColor: Colors.white.withOpacity(0.16),
               valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+class _DecisionCard extends StatelessWidget {
+  final _TipDecision decision;
+
+  const _DecisionCard({required this.decision});
+
+  @override
+  Widget build(BuildContext context) {
+    return _PremiumCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: decision.color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(decision.icon, color: decision.color, size: 24),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  decision.title,
+                  style: TextStyle(
+                    color: decision.color,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  decision.reason,
+                  style: const TextStyle(
+                    color: KickMindTheme.textDark,
+                    height: 1.38,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -415,12 +480,14 @@ class _Recommendation extends StatelessWidget {
   final FootballMatch match;
   final PredictionBreakdown breakdown;
   final TopTipScore topScore;
+  final _TipDecision decision;
   final _ValueInfo valueInfo;
 
   const _Recommendation({
     required this.match,
     required this.breakdown,
     required this.topScore,
+    required this.decision,
     required this.valueInfo,
   });
 
@@ -457,6 +524,7 @@ class _Recommendation extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
+                _Badge(text: decision.label, color: decision.color),
                 _Badge(text: '${match.riskEmoji} ${match.riskLevel}', color: riskColor),
                 _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: Colors.deepPurple),
                 _Badge(text: 'AI ${match.aiScore}%', color: KickMindTheme.warning),
@@ -859,6 +927,85 @@ class _SectionTitle extends StatelessWidget {
     return Text(
       text,
       style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+    );
+  }
+}
+
+
+class _TipDecision {
+  final String label;
+  final String title;
+  final String reason;
+  final Color color;
+  final IconData icon;
+
+  const _TipDecision({
+    required this.label,
+    required this.title,
+    required this.reason,
+    required this.color,
+    required this.icon,
+  });
+
+  factory _TipDecision.fromMatch(FootballMatch match, TopTipScore score) {
+    final finalScore = score.finalScore;
+    final confidence = score.confidence;
+    final valueEdge = score.valueEdge;
+    final highRisk = score.isHighRisk;
+    final oddsExtreme = match.odds >= 4.50 || match.odds < 1.18;
+
+    final premiumCandidate = finalScore >= 72 &&
+        confidence >= 66 &&
+        match.aiScore >= 68 &&
+        !oddsExtreme &&
+        !(highRisk && match.aiScore < 84);
+
+    if (premiumCandidate) {
+      return const _TipDecision(
+        label: 'Premium Tipp',
+        title: 'Premium Tipp bestätigt',
+        reason: 'Die Bewertung ist stark genug: hoher Final Score, ausreichende Confidence, vertretbare Quote und kein blockierendes Risiko.',
+        color: KickMindTheme.primary,
+        icon: Icons.workspace_premium_rounded,
+      );
+    }
+
+    final valueCandidate = valueEdge >= 5.0 &&
+        match.aiScore >= 66 &&
+        finalScore >= 62 &&
+        !oddsExtreme;
+
+    if (valueCandidate) {
+      return const _TipDecision(
+        label: 'Value Chance',
+        title: 'Value Chance, aber kein sicherer Premium Tipp',
+        reason: 'Die Quote bietet rechnerischen Value. Trotzdem ist die Gesamtbewertung nicht stark genug, um den Tipp als Premium einzustufen.',
+        color: KickMindTheme.success,
+        icon: Icons.trending_up_rounded,
+      );
+    }
+
+    final noBet = finalScore < 56 ||
+        match.aiScore < 58 ||
+        oddsExtreme ||
+        (highRisk && finalScore < 70);
+
+    if (noBet) {
+      return const _TipDecision(
+        label: 'No Bet',
+        title: 'No Bet empfohlen',
+        reason: 'Der Tipp ist aktuell zu schwach oder zu riskant. Final Score, Quote, Risiko oder AI Score reichen nicht für eine Empfehlung.',
+        color: KickMindTheme.danger,
+        icon: Icons.block_rounded,
+      );
+    }
+
+    return const _TipDecision(
+      label: 'Beobachten',
+      title: 'Beobachten statt sofort spielen',
+      reason: 'Es gibt brauchbare Signale, aber die Kombination aus Score, Risiko und Value ist noch nicht stark genug für Premium.',
+      color: KickMindTheme.accent,
+      icon: Icons.visibility_rounded,
     );
   }
 }
