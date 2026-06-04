@@ -700,9 +700,25 @@ class _SectionHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 2),
-              Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  height: 1.15,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: Color(0xFF6B7280),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  height: 1.25,
+                ),
+              ),
             ],
           ),
         ),
