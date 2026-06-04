@@ -120,12 +120,19 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
               const SizedBox(height: 10),
               _FormComparison(match: match),
               const SizedBox(height: 16),
-              const _SectionTitle('Pro Kurzbewertung'),
+              const _SectionTitle('Begründung'),
               const SizedBox(height: 10),
-              _ReasonCard(
-                match: match,
-                breakdown: breakdown,
-                valueInfo: valueInfo,
+              _PremiumCard(
+                child: Text(
+                  breakdown.reason.trim().isEmpty
+                      ? match.shortReason
+                      : breakdown.reason,
+                  style: TextStyle(
+                    color: Colors.grey.shade800,
+                    height: 1.45,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               const _SectionTitle('Gewinnsimulation'),
@@ -312,128 +319,6 @@ class _Recommendation extends StatelessWidget {
   }
 }
 
-
-class _ReasonCard extends StatelessWidget {
-  final FootballMatch match;
-  final PredictionBreakdown breakdown;
-  final _ValueInfo valueInfo;
-
-  const _ReasonCard({
-    required this.match,
-    required this.breakdown,
-    required this.valueInfo,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final reason = breakdown.reason.trim().isEmpty
-        ? match.shortReason.trim()
-        : breakdown.reason.trim();
-
-    final primaryReason = reason.isEmpty
-        ? 'Form, Heim/Auswärts-Werte, Tore-Trend, Risiko und Quote wurden kombiniert bewertet.'
-        : reason;
-
-    return _PremiumCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _ReasonBlock(
-            icon: Icons.check_circle_rounded,
-            title: 'Empfehlung',
-            text:
-            'Tipp ${match.tipLabel} · AI ${match.aiScore}% · Quote ${match.odds.toStringAsFixed(2)}.',
-            color: KickMindTheme.primary,
-          ),
-          const SizedBox(height: 12),
-          _ReasonBlock(
-            icon: Icons.analytics_rounded,
-            title: 'Warum?',
-            text: primaryReason,
-            color: Colors.deepPurple,
-          ),
-          const SizedBox(height: 12),
-          _ReasonBlock(
-            icon: Icons.shield_rounded,
-            title: 'Risiko',
-            text:
-            'Risikostufe ${match.riskLevel}. Tipp nicht isoliert bewerten, sondern mit Quote und Confidence abgleichen.',
-            color: KickMindTheme.riskColor(match.riskLevel),
-          ),
-          if (valueInfo.isValueBet) ...[
-            const SizedBox(height: 12),
-            _ReasonBlock(
-              icon: Icons.trending_up_rounded,
-              title: 'Value',
-              text:
-              'Positiver Edge von +${valueInfo.edgePercent.toStringAsFixed(1)}%. Die AI-Wahrscheinlichkeit liegt über der impliziten Quote.',
-              color: KickMindTheme.success,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ReasonBlock extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String text;
-  final Color color;
-
-  const _ReasonBlock({
-    required this.icon,
-    required this.title,
-    required this.text,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 38,
-          height: 38,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Icon(icon, color: color, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Color(0xFF111827),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                text,
-                style: TextStyle(
-                  color: Colors.grey.shade800,
-                  height: 1.35,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _ValueExplanation extends StatelessWidget {
   final FootballMatch match;
   final _ValueInfo valueInfo;
@@ -442,12 +327,16 @@ class _ValueExplanation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final edgeText = valueInfo.edgePercent >= 0
+        ? '+${valueInfo.edgePercent.toStringAsFixed(1)}%'
+        : '${valueInfo.edgePercent.toStringAsFixed(1)}%';
+
     return _PremiumCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '💰 VALUE BET gefunden',
+            'Value Bet erkannt',
             style: TextStyle(
               color: KickMindTheme.success,
               fontSize: 16,
@@ -455,17 +344,88 @@ class _ValueExplanation extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          _InfoRow(label: 'AI Wahrscheinlichkeit', value: '${valueInfo.aiProbabilityPercent.toStringAsFixed(1)}%'),
-          _InfoRow(label: 'Quote', value: match.odds.toStringAsFixed(2)),
-          _InfoRow(label: 'Implizite Wahrscheinlichkeit', value: '${valueInfo.impliedProbabilityPercent.toStringAsFixed(1)}%'),
-          _InfoRow(label: 'Vorteil / Edge', value: '+${valueInfo.edgePercent.toStringAsFixed(1)}%'),
-          const SizedBox(height: 8),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _ValueMetricTile(
+                label: 'AI Wahrscheinlichkeit',
+                value: '${valueInfo.aiProbabilityPercent.toStringAsFixed(1)}%',
+                color: KickMindTheme.primary,
+              ),
+              _ValueMetricTile(
+                label: 'Quote',
+                value: match.odds.toStringAsFixed(2),
+                color: KickMindTheme.primaryDark,
+              ),
+              _ValueMetricTile(
+                label: 'Implizit',
+                value: '${valueInfo.impliedProbabilityPercent.toStringAsFixed(1)}%',
+                color: Colors.deepPurple,
+              ),
+              _ValueMetricTile(
+                label: 'Edge',
+                value: edgeText,
+                color: KickMindTheme.success,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           Text(
-            'Die AI-Wahrscheinlichkeit liegt über der aus der Quote abgeleiteten Wahrscheinlichkeit. Das ist ein potenzieller Value-Hinweis, keine Gewinn-Garantie.',
+            'Die AI-Wahrscheinlichkeit liegt über der aus der Quote abgeleiteten Wahrscheinlichkeit. Das ist ein Value-Hinweis, keine Garantie.',
             style: TextStyle(
               color: Colors.grey.shade800,
               height: 1.4,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ValueMetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _ValueMetricTile({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 145,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: KickMindTheme.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
             ),
           ),
         ],

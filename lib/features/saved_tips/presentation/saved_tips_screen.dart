@@ -153,9 +153,9 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
                 _SavedSummary(stats: stats),
                 const SizedBox(height: 18),
                 const _SectionTitle(
-                  icon: Icons.bookmark_rounded,
-                  title: 'Gespeicherte Tipps',
-                  subtitle: 'Mit derselben Premium / Value / No-Bet Logik wie Top Tipps.',
+                    icon: Icons.bookmark_rounded,
+                    title: 'Gespeicherte Tipps',
+                    subtitle: 'Gespeicherte Auswahl mit zentraler Bewertung.'
                 ),
                 const SizedBox(height: 12),
                 ...tips.map((match) {
@@ -548,10 +548,8 @@ class _SavedTipCard extends StatelessWidget {
     final valueText = value.isValueBet
         ? ' · Value +${value.edgePercent.toStringAsFixed(1)}%'
         : '';
-    final baseReason = match.shortReason.trim();
-    final reason = baseReason.isEmpty ? decision.reason : baseReason;
 
-    return '${decision.label}: ${match.tipLabel} · Final ${score.finalScore.toStringAsFixed(1)} · AI ${match.aiScore}% · Conf ${score.confidence.toStringAsFixed(0)}%$valueText. $reason';
+    return '${decision.label}: ${match.tipLabel} · Final ${score.finalScore.toStringAsFixed(1)} · AI ${match.aiScore}% · Conf ${score.confidence.toStringAsFixed(0)}%$valueText';
   }
 }
 
