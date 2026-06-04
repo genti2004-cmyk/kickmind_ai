@@ -1,6 +1,5 @@
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/value_bets/domain/value_bet_result.dart';
-import 'package:kickmind_ai/features/odds/data/live_odds_service.dart';
 
 class ValueBetService {
   const ValueBetService();

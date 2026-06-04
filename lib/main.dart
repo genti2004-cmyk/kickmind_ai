@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:kickmind_ai/core/theme/kickmind_theme.dart';
 
 import 'core/navigation/main_navigation_screen.dart';
 import 'core/theme/app_theme.dart';
