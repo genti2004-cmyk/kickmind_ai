@@ -163,7 +163,26 @@ class TopTipScoreService {
       );
     }
 
-    final watchCandidate = finalScore >= 58 && confidence >= 52 && !highRisk;
+    final hardNoBet = finalScore < 44 ||
+        confidence < 46 ||
+        match.aiScore < 56 ||
+        (highRisk && finalScore < 64) ||
+        (oddsExtreme && finalScore < 68) ||
+        valueEdge <= -18.0;
+
+    if (hardNoBet) {
+      return const TopTipDecision(
+        type: TopTipDecisionType.noBet,
+        label: 'No Bet',
+        shortLabel: 'No Bet',
+        title: 'No Bet empfohlen',
+        reason: 'Score, Risiko oder Quote reichen aktuell nicht für eine klare Empfehlung.',
+      );
+    }
+
+    final watchCandidate = finalScore >= 48 &&
+        confidence >= 52 &&
+        match.aiScore >= 62;
 
     if (watchCandidate) {
       return const TopTipDecision(
@@ -171,7 +190,7 @@ class TopTipScoreService {
         label: 'Beobachten',
         shortLabel: 'Watch',
         title: 'Beobachten statt sofort spielen',
-        reason: 'Der Tipp ist interessant, aber noch nicht stark genug für Premium.',
+        reason: 'Der Tipp hat brauchbare AI-/Confidence-Werte, ist aber noch nicht stark genug für Premium oder Value.',
       );
     }
 

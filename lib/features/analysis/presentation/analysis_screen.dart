@@ -101,10 +101,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                 _AnalysisHero(
                   rangeLabel: _range.label,
                   matchesCount: ranked.length,
-                  recommendedCount: buckets.premium.length,
+                  premiumCount: buckets.premium.length,
+                  watchCount: buckets.watch.length,
+                  noBetCount: buckets.noBet.length,
                   bestMatch: ranked.first,
                   bestFinalScore: _finalScore(ranked.first),
                   bestValueEdge: _valueEdge(ranked.first),
+                  avgFinalScore: avgFinal,
                 ),
                 const SizedBox(height: 16),
                 _MetricGrid(
@@ -122,16 +125,16 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                       color: KickMindTheme.success,
                     ),
                     _MetricCard(
+                      label: 'Beobachten',
+                      value: '${buckets.watch.length}',
+                      icon: Icons.visibility_rounded,
+                      color: KickMindTheme.primaryDark,
+                    ),
+                    _MetricCard(
                       label: 'No Bet',
                       value: '${buckets.noBet.length}',
                       icon: Icons.block_rounded,
                       color: KickMindTheme.danger,
-                    ),
-                    _MetricCard(
-                      label: 'Ø Final',
-                      value: avgFinal.toStringAsFixed(1),
-                      icon: Icons.speed_rounded,
-                      color: KickMindTheme.primaryDark,
                     ),
                   ],
                 ),
@@ -383,22 +386,32 @@ class _AnalysisRangeSelector extends StatelessWidget {
 class _AnalysisHero extends StatelessWidget {
   final String rangeLabel;
   final int matchesCount;
-  final int recommendedCount;
+  final int premiumCount;
+  final int watchCount;
+  final int noBetCount;
   final FootballMatch bestMatch;
   final double bestFinalScore;
   final double bestValueEdge;
+  final double avgFinalScore;
 
   const _AnalysisHero({
     required this.rangeLabel,
     required this.matchesCount,
-    required this.recommendedCount,
+    required this.premiumCount,
+    required this.watchCount,
+    required this.noBetCount,
     required this.bestMatch,
     required this.bestFinalScore,
     required this.bestValueEdge,
+    required this.avgFinalScore,
   });
 
   @override
   Widget build(BuildContext context) {
+    final subtitle = premiumCount > 0
+        ? '$matchesCount Spiele analysiert · $premiumCount Premium · $watchCount Beobachten'
+        : '$matchesCount Spiele analysiert · $watchCount Beobachten · $noBetCount Risiko/No Bet';
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -441,7 +454,7 @@ class _AnalysisHero extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '$matchesCount Spiele · $recommendedCount Premium Tipps',
+                      subtitle,
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.78),
                         fontWeight: FontWeight.w800,
@@ -469,6 +482,7 @@ class _AnalysisHero extends StatelessWidget {
             runSpacing: 8,
             children: [
               _HeroPill(label: 'Final ${bestFinalScore.toStringAsFixed(1)}'),
+              _HeroPill(label: 'Ø Final ${avgFinalScore.toStringAsFixed(1)}'),
               _HeroPill(label: 'AI ${bestMatch.aiScore}%'),
               _HeroPill(label: 'Value ${bestValueEdge >= 0 ? '+' : ''}${bestValueEdge.toStringAsFixed(1)}%'),
             ],
