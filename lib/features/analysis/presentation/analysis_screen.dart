@@ -84,14 +84,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             );
           }
 
-          final recommended = ranked.where(_isRecommendedTip).toList();
-          final valueBets = ranked.where(_isValueBet).toList();
-          final highRisk = ranked.where(_isHighRisk).toList();
-          final lowRisk = ranked.where(_isLowRisk).toList();
-
-          final avgAi = ranked.map((m) => m.aiScore).fold<int>(0, (a, b) => a + b) / ranked.length;
+          final buckets = _buildBuckets(ranked);
           final avgFinal = ranked.map(_finalScore).fold<double>(0, (a, b) => a + b) / ranked.length;
-          final avgValue = ranked.map(_valueEdge).fold<double>(0, (a, b) => a + b) / ranked.length;
 
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -107,7 +101,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                 _AnalysisHero(
                   rangeLabel: _range.label,
                   matchesCount: ranked.length,
-                  recommendedCount: recommended.length,
+                  recommendedCount: buckets.premium.length,
                   bestMatch: ranked.first,
                   bestFinalScore: _finalScore(ranked.first),
                   bestValueEdge: _valueEdge(ranked.first),
@@ -116,10 +110,22 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                 _MetricGrid(
                   children: [
                     _MetricCard(
-                      label: 'Ø AI',
-                      value: avgAi.toStringAsFixed(0),
-                      icon: Icons.psychology_rounded,
+                      label: 'Premium',
+                      value: '${buckets.premium.length}',
+                      icon: Icons.workspace_premium_rounded,
                       color: KickMindTheme.primary,
+                    ),
+                    _MetricCard(
+                      label: 'Value',
+                      value: '${buckets.value.length}',
+                      icon: Icons.trending_up_rounded,
+                      color: KickMindTheme.success,
+                    ),
+                    _MetricCard(
+                      label: 'No Bet',
+                      value: '${buckets.noBet.length}',
+                      icon: Icons.block_rounded,
+                      color: KickMindTheme.danger,
                     ),
                     _MetricCard(
                       label: 'Ø Final',
@@ -127,25 +133,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                       icon: Icons.speed_rounded,
                       color: KickMindTheme.primaryDark,
                     ),
-                    _MetricCard(
-                      label: 'Value',
-                      value: '${avgValue >= 0 ? '+' : ''}${avgValue.toStringAsFixed(1)}%',
-                      icon: Icons.trending_up_rounded,
-                      color: KickMindTheme.success,
-                    ),
-                    _MetricCard(
-                      label: 'Low Risk',
-                      value: '${lowRisk.length}',
-                      icon: Icons.shield_rounded,
-                      color: KickMindTheme.warning,
-                    ),
                   ],
                 ),
                 const SizedBox(height: 20),
                 _SectionTitle(
                   icon: Icons.auto_graph_rounded,
-                  title: 'Top-Tipps Ranking',
-                  subtitle: 'AI, Final Score, Value, Risiko und Quote gemeinsam bewertet.',
+                  title: 'Finales Analyse-Ranking',
+                  subtitle: 'Dieselbe Premium-, Value-, Beobachten- und No-Bet-Logik wie bei Top Tipps.',
                 ),
                 const SizedBox(height: 12),
                 ...ranked.take(5).map(
@@ -155,35 +149,77 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                     finalScore: _finalScore(match),
                     valueEdge: _valueEdge(match),
                     confidence: _confidence(match),
+                    statusLabel: _categoryLabel(match),
+                    statusColor: _categoryColor(match),
                     onTap: () => _openDetail(match),
                   ),
                 ),
-                if (valueBets.isNotEmpty) ...[
+                if (buckets.premium.isNotEmpty) ...[
                   const SizedBox(height: 18),
                   _SectionTitle(
-                    icon: Icons.attach_money_rounded,
-                    title: 'Value Analyse',
-                    subtitle: 'Spiele mit positiver Differenz zwischen AI-Wahrscheinlichkeit und Quote.',
+                    icon: Icons.workspace_premium_rounded,
+                    title: 'Premium Top Tipps',
+                    subtitle: 'Starke Kombination aus AI, Final Score, Risiko und Quote.',
                   ),
                   const SizedBox(height: 12),
-                  ...valueBets.take(4).map(
+                  ...buckets.premium.take(4).map(
                         (match) => _CompactAnalysisTile(
                       match: match,
                       finalScore: _finalScore(match),
                       valueEdge: _valueEdge(match),
+                      statusLabel: 'Premium',
+                      statusColor: KickMindTheme.primary,
                       onTap: () => _openDetail(match),
                     ),
                   ),
                 ],
-                if (highRisk.isNotEmpty) ...[
+                if (buckets.value.isNotEmpty) ...[
                   const SizedBox(height: 18),
                   _SectionTitle(
-                    icon: Icons.warning_amber_rounded,
-                    title: 'Risiko-Warnung',
-                    subtitle: 'Diese Spiele haben erhöhtes Risiko und sollten vorsichtig bewertet werden.',
+                    icon: Icons.trending_up_rounded,
+                    title: 'Value Chancen',
+                    subtitle: 'Positive Edge, aber noch nicht automatisch Premium.',
                   ),
                   const SizedBox(height: 12),
-                  ...highRisk.take(4).map(
+                  ...buckets.value.take(4).map(
+                        (match) => _CompactAnalysisTile(
+                      match: match,
+                      finalScore: _finalScore(match),
+                      valueEdge: _valueEdge(match),
+                      statusLabel: 'Value',
+                      statusColor: KickMindTheme.success,
+                      onTap: () => _openDetail(match),
+                    ),
+                  ),
+                ],
+                if (buckets.watch.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  _SectionTitle(
+                    icon: Icons.visibility_rounded,
+                    title: 'Beobachten',
+                    subtitle: 'Solide Ansätze, aber Final Score oder Risiko noch nicht stark genug.',
+                  ),
+                  const SizedBox(height: 12),
+                  ...buckets.watch.take(4).map(
+                        (match) => _CompactAnalysisTile(
+                      match: match,
+                      finalScore: _finalScore(match),
+                      valueEdge: _valueEdge(match),
+                      statusLabel: 'Watch',
+                      statusColor: KickMindTheme.primaryDark,
+                      onTap: () => _openDetail(match),
+                    ),
+                  ),
+                ],
+                if (buckets.noBet.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  _SectionTitle(
+                    icon: Icons.block_rounded,
+                    title: 'No Bet / Risiko-Warnung',
+                    subtitle: 'Zu wenig Edge, zu hohes Risiko oder zu schwacher Final Score.',
+                  ),
+                  const SizedBox(height: 12),
+                  ...buckets.noBet.take(5).map(
                         (match) => _RiskWarningTile(
                       match: match,
                       finalScore: _finalScore(match),
@@ -197,6 +233,86 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         },
       ),
     );
+  }
+
+
+  _AnalysisBuckets _buildBuckets(List<FootballMatch> ranked) {
+    final premium = <FootballMatch>[];
+    final value = <FootballMatch>[];
+    final watch = <FootballMatch>[];
+    final noBet = <FootballMatch>[];
+
+    for (final match in ranked) {
+      final finalScore = _finalScore(match);
+      final confidence = _confidence(match);
+      final valueEdge = _valueEdge(match);
+      final highRisk = _isHighRisk(match);
+      final oddsExtreme = match.odds >= 4.50;
+
+      final premiumCandidate = finalScore >= 72 &&
+          confidence >= 66 &&
+          match.aiScore >= 68 &&
+          !highRisk &&
+          !oddsExtreme;
+
+      final valueCandidate = valueEdge >= 5.0 &&
+          finalScore >= 64 &&
+          confidence >= 58 &&
+          !highRisk;
+
+      final watchCandidate = finalScore >= 58 && confidence >= 52;
+
+      if (premiumCandidate || _isRecommendedTip(match)) {
+        premium.add(match);
+      } else if (valueCandidate || _isValueBet(match)) {
+        value.add(match);
+      } else if (watchCandidate && !highRisk) {
+        watch.add(match);
+      } else {
+        noBet.add(match);
+      }
+    }
+
+    return _AnalysisBuckets(
+      premium: premium.take(7).toList(),
+      value: value.take(5).toList(),
+      watch: watch.take(7).toList(),
+      noBet: noBet,
+    );
+  }
+
+  String _categoryLabel(FootballMatch match) {
+    final score = _scoreService.score(match);
+    final finalScore = score.finalScore;
+    final confidence = score.confidence;
+    final valueEdge = score.valueEdge;
+    final highRisk = _isHighRisk(match);
+    final oddsExtreme = match.odds >= 4.50;
+
+    if ((finalScore >= 72 && confidence >= 66 && match.aiScore >= 68 && !highRisk && !oddsExtreme) ||
+        score.isRecommended) {
+      return 'Premium';
+    }
+    if ((valueEdge >= 5.0 && finalScore >= 64 && confidence >= 58 && !highRisk) || score.isValueBet) {
+      return 'Value';
+    }
+    if (finalScore >= 58 && confidence >= 52 && !highRisk) {
+      return 'Watch';
+    }
+    return 'No Bet';
+  }
+
+  Color _categoryColor(FootballMatch match) {
+    switch (_categoryLabel(match)) {
+      case 'Premium':
+        return KickMindTheme.primary;
+      case 'Value':
+        return KickMindTheme.success;
+      case 'Watch':
+        return KickMindTheme.primaryDark;
+      default:
+        return KickMindTheme.danger;
+    }
   }
 
   void _openDetail(FootballMatch match) {
@@ -222,10 +338,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     return _scoreService.isHighRisk(match);
   }
 
-  bool _isLowRisk(FootballMatch match) {
-    return _scoreService.isLowRisk(match);
-  }
-
   double _finalScore(FootballMatch match) {
     return _scoreService.score(match).finalScore;
   }
@@ -238,6 +350,21 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     return _scoreService.score(match).valueEdge;
   }
 
+}
+
+
+class _AnalysisBuckets {
+  final List<FootballMatch> premium;
+  final List<FootballMatch> value;
+  final List<FootballMatch> watch;
+  final List<FootballMatch> noBet;
+
+  const _AnalysisBuckets({
+    required this.premium,
+    required this.value,
+    required this.watch,
+    required this.noBet,
+  });
 }
 
 class _AnalysisRangeSelector extends StatelessWidget {
@@ -355,7 +482,7 @@ class _AnalysisHero extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '$matchesCount Spiele · $recommendedCount klare Empfehlungen',
+                      '$matchesCount Spiele · $recommendedCount Premium Tipps',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.78),
                         fontWeight: FontWeight.w800,
@@ -567,6 +694,8 @@ class _AnalysisTipTile extends StatelessWidget {
   final double finalScore;
   final double valueEdge;
   final double confidence;
+  final String statusLabel;
+  final Color statusColor;
   final VoidCallback onTap;
 
   const _AnalysisTipTile({
@@ -575,6 +704,8 @@ class _AnalysisTipTile extends StatelessWidget {
     required this.finalScore,
     required this.valueEdge,
     required this.confidence,
+    required this.statusLabel,
+    required this.statusColor,
     required this.onTap,
   });
 
@@ -656,6 +787,7 @@ class _AnalysisTipTile extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
+                  _SmallPill(label: statusLabel, color: statusColor),
                   _SmallPill(label: match.tipLabel, color: KickMindTheme.primary),
                   _SmallPill(label: 'Final ${finalScore.toStringAsFixed(1)}', color: KickMindTheme.primaryDark),
                   _SmallPill(label: 'AI ${match.aiScore}%', color: KickMindTheme.warning),
@@ -677,12 +809,16 @@ class _CompactAnalysisTile extends StatelessWidget {
   final FootballMatch match;
   final double finalScore;
   final double valueEdge;
+  final String statusLabel;
+  final Color statusColor;
   final VoidCallback onTap;
 
   const _CompactAnalysisTile({
     required this.match,
     required this.finalScore,
     required this.valueEdge,
+    required this.statusLabel,
+    required this.statusColor,
     required this.onTap,
   });
 
@@ -690,9 +826,9 @@ class _CompactAnalysisTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return _SimpleInfoTile(
       icon: Icons.trending_up_rounded,
-      iconColor: KickMindTheme.success,
+      iconColor: statusColor,
       title: match.teamsLabel,
-      subtitle: '${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge >= 0 ? '+' : ''}${valueEdge.toStringAsFixed(1)}%',
+      subtitle: '$statusLabel · ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge >= 0 ? '+' : ''}${valueEdge.toStringAsFixed(1)}%',
       onTap: onTap,
     );
   }
