@@ -120,7 +120,7 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                 const _SectionTitle(
                   icon: Icons.auto_awesome_rounded,
                   title: 'Beste Auswahl',
-                  subtitle: 'AI-Score, Value-Edge, Risiko und Quote kombiniert.',
+                  subtitle: 'Streng sortiert nach Final Score, Value und Risiko.',
                 ),
                 const SizedBox(height: 12),
                 ...visibleTopTips.take(8).map(
@@ -138,7 +138,7 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                   const _SectionTitle(
                     icon: Icons.trending_up_rounded,
                     title: 'Value Chancen',
-                    subtitle: 'AI-Wahrscheinlichkeit liegt über der impliziten Quote.',
+                    subtitle: 'Quoten mit positivem Edge gegen die AI-Bewertung.',
                   ),
                   const SizedBox(height: 12),
                   ...valueBets.map(
@@ -155,7 +155,7 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                   const _SectionTitle(
                     icon: Icons.visibility_rounded,
                     title: 'Beobachten',
-                    subtitle: 'Interessant, aber noch kein klarer Premium-Tipp.',
+                    subtitle: 'Solide Ansätze, aber noch kein Premium-Signal.',
                   ),
                   const SizedBox(height: 12),
                   ...watchList.map(
@@ -458,6 +458,7 @@ class _TopTipCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
     final riskColor = KickMindTheme.riskColor(match.riskLevel);
+    final cardReason = _buildCardReason();
 
     return InkWell(
       onTap: onTap,
@@ -548,23 +549,41 @@ class _TopTipCard extends StatelessWidget {
               value: confidence,
               color: scoreColor,
             ),
-            if (match.shortReason.trim().isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                match.shortReason,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.grey.shade800,
-                  height: 1.34,
-                  fontWeight: FontWeight.w600,
-                ),
+            const SizedBox(height: 12),
+            Text(
+              cardReason,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.grey.shade800,
+                height: 1.34,
+                fontWeight: FontWeight.w700,
               ),
-            ],
+            ),
           ],
         ),
       ),
     );
+  }
+
+  String _buildCardReason() {
+    final valueText = valueEdge >= 0
+        ? '+${valueEdge.toStringAsFixed(1)}%'
+        : '${valueEdge.toStringAsFixed(1)}%';
+
+    if (finalScore >= 74 && valueEdge >= 8 && match.riskLevel != 'Hoch') {
+      return 'Premium: ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value $valueText · Risiko ${match.riskLevel}.';
+    }
+
+    if (valueEdge >= 8 && match.riskLevel != 'Hoch') {
+      return 'Value: ${match.tipLabel} · Quote ${match.odds.toStringAsFixed(2)} · Edge $valueText · Risiko ${match.riskLevel}.';
+    }
+
+    if (finalScore >= 55 && match.riskLevel != 'Hoch') {
+      return 'Watch: solide Datenlage · Final ${finalScore.toStringAsFixed(1)} · Risiko ${match.riskLevel}.';
+    }
+
+    return 'No Bet: Score, Value oder Risiko reichen aktuell nicht für eine Empfehlung.';
   }
 }
 
@@ -584,6 +603,11 @@ class _CompactTipCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
+    final valueText = valueEdge >= 0
+        ? '+${valueEdge.toStringAsFixed(1)}%'
+        : '${valueEdge.toStringAsFixed(1)}%';
+    final compactLine =
+        '${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value $valueText';
 
     return InkWell(
       onTap: onTap,
@@ -632,7 +656,7 @@ class _CompactTipCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge.toStringAsFixed(1)}%',
+                    compactLine,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
