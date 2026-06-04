@@ -2,14 +2,15 @@ import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/predictions/domain/prediction_breakdown.dart';
 import 'package:kickmind_ai/features/predictions/domain/pro_prediction_input.dart';
 
-/// Finale PredictionEngine für KickMind AI.
+/// PredictionEngine für KickMind AI.
 ///
-/// Ziele:
-/// - kompatibel mit deinem bestehenden FootballMatch-Modell
-/// - keine neuen RiskLevel-Enums
-/// - Tipp-Labels: 1, X, 2, 1X, X2, 12, Über 2.5, Unter 2.5, BTTS
-/// - transparenter PredictionBreakdown für UI/Detail-Screen
-/// - alte Methoden wie buildMatch(), rankTopTips(), smartScore() bleiben erhalten
+/// Stufe 8:
+/// - realistischere Gewichtung der Signale
+/// - vorsichtigere 1/X/2-Auswahl
+/// - bessere No-Bet-/Risiko-Vorbereitung über Risiko und Confidence
+/// - stabilere Begründungen für Top Tipps, Detailseite und Analyse
+/// - alte Methoden bleiben kompatibel: buildMatch(), buildProMatch(),
+///   buildBreakdown(), rankTopTips(), smartScore(), calculateAiScore().
 class PredictionEngine {
   const PredictionEngine();
 
@@ -184,7 +185,9 @@ class PredictionEngine {
       List<FootballMatch> matches, {
         int limit = 5,
       }) {
-    final sorted = [...matches]
+    final ranked = matches
+        .where((match) => _isPlayableMatch(match))
+        .toList()
       ..sort((a, b) {
         final confidenceA = _derivedConfidenceFromMatch(a);
         final confidenceB = _derivedConfidenceFromMatch(b);
@@ -195,13 +198,23 @@ class PredictionEngine {
         final scoreCompare = b.aiScore.compareTo(a.aiScore);
         if (scoreCompare != 0) return scoreCompare;
 
-        return a.odds.compareTo(b.odds);
+        // Bei gleicher Qualität bevorzugen wir keine extremen Fantasiequoten.
+        final oddsDistanceA = (a.odds - 1.85).abs();
+        final oddsDistanceB = (b.odds - 1.85).abs();
+        return oddsDistanceA.compareTo(oddsDistanceB);
       });
 
-    return sorted.take(limit).toList();
+    return ranked.take(limit).toList();
   }
 
-  int smartScore(FootballMatch match) => match.aiScore;
+  int smartScore(FootballMatch match) {
+    final confidence = _derivedConfidenceFromMatch(match);
+    final oddsPenalty = match.odds >= 3.20 ? 6 : 0;
+    final riskPenalty = match.riskLevel == 'Hoch' ? 8 : 0;
+    return ((match.aiScore * 0.70) + (confidence * 0.30) - oddsPenalty - riskPenalty)
+        .round()
+        .clamp(1, 99);
+  }
 
   int calculateAiScore({
     required int homeFormScore,
@@ -210,19 +223,29 @@ class PredictionEngine {
     required double odds,
     required TipType tipType,
   }) {
-    final formScore = switch (tipType) {
-      TipType.homeWin => homeFormScore,
-      TipType.awayWin => awayFormScore,
-      TipType.draw =>
-          (100 - (homeFormScore - awayFormScore).abs()).clamp(40, 95),
-      TipType.over25 => goalsScore,
-      TipType.under25 => 100 - goalsScore,
-      TipType.btts => ((goalsScore + homeFormScore + awayFormScore) / 3).round(),
+    final formDiff = homeFormScore - awayFormScore;
+    final balancedScore = (100 - formDiff.abs()).clamp(35, 96);
+
+    final marketScore = switch (tipType) {
+      TipType.homeWin => _sideWinScore(
+        ownForm: homeFormScore,
+        opponentForm: awayFormScore,
+        diff: formDiff,
+      ),
+      TipType.awayWin => _sideWinScore(
+        ownForm: awayFormScore,
+        opponentForm: homeFormScore,
+        diff: -formDiff,
+      ),
+      TipType.draw => balancedScore,
+      TipType.over25 => ((goalsScore * 0.80) + (_bothTeamsForm(homeFormScore, awayFormScore) * 0.20)).round(),
+      TipType.under25 => (((100 - goalsScore) * 0.82) + (balancedScore * 0.18)).round(),
+      TipType.btts => ((goalsScore * 0.58) + (_bothTeamsForm(homeFormScore, awayFormScore) * 0.42)).round(),
     };
 
-    final oddsScore = (100 - ((odds - 1.0) * 20)).round().clamp(35, 100);
+    final oddsScore = _oddsQualityScore(odds);
 
-    return ((formScore * 0.55) + (goalsScore * 0.25) + (oddsScore * 0.20))
+    return ((marketScore * 0.72) + (oddsScore * 0.18) + (balancedScore * 0.10))
         .round()
         .clamp(1, 99);
   }
@@ -234,9 +257,13 @@ class PredictionEngine {
   }) {
     final label = tipLabel ?? '';
     final saferMarket = label == '1X' || label == 'X2' || label == '12';
+    final volatileMarket = label == 'X' || odds >= 3.00;
 
-    if (aiScore >= 82 && (odds <= 1.90 || saferMarket)) return 'Niedrig';
-    if (aiScore >= 70 && odds <= 2.45) return 'Mittel';
+    if (aiScore >= 84 && (odds <= 1.95 || saferMarket)) return 'Niedrig';
+    if (aiScore >= 76 && saferMarket) return 'Niedrig';
+    if (volatileMarket && aiScore < 88) return 'Hoch';
+    if (aiScore >= 72 && odds <= 2.35) return 'Mittel';
+    if (aiScore >= 78 && odds <= 2.75) return 'Mittel';
     return 'Hoch';
   }
 
@@ -253,14 +280,21 @@ class PredictionEngine {
       confidence += 5;
     }
     if (tipLabel == 'Über 2.5' || tipLabel == 'Unter 2.5' || tipLabel == 'BTTS') {
-      confidence += 2;
+      confidence += 1;
+    }
+    if (tipLabel == 'X') {
+      confidence -= 4;
     }
 
-    if (riskLevel == 'Niedrig') confidence += 3;
-    if (riskLevel == 'Hoch') confidence -= 8;
+    if (riskLevel == 'Niedrig') confidence += 4;
+    if (riskLevel == 'Mittel') confidence += 1;
+    if (riskLevel == 'Hoch') confidence -= 10;
 
-    if (formScore != null && formScore >= 80) confidence += 2;
-    if (goalsTrendScore != null && goalsTrendScore >= 80) confidence += 2;
+    if (formScore != null && formScore >= 82) confidence += 2;
+    if (goalsTrendScore != null && goalsTrendScore >= 82) confidence += 1;
+    if (goalsTrendScore != null && goalsTrendScore <= 34 && tipLabel == 'Unter 2.5') {
+      confidence += 2;
+    }
 
     return confidence.clamp(1, 99);
   }
@@ -274,23 +308,24 @@ class PredictionEngine {
   }) {
     final tip = tipLabel(tipType);
     final diff = homeFormScore - awayFormScore;
+    final formText = '$homeFormScore:$awayFormScore';
 
     if (tipType == TipType.homeWin) {
-      return '$tip empfohlen. Heimteam mit Formvorteil $homeFormScore:$awayFormScore. AI $aiScore, Tore-Trend $goalsScore.';
+      return '$tip empfohlen: Heimteam hat den klareren Formvorteil ($formText). AI $aiScore, Tore-Trend $goalsScore.';
     }
     if (tipType == TipType.awayWin) {
-      return '$tip empfohlen. Auswärtsteam mit Formvorteil $awayFormScore:$homeFormScore. AI $aiScore, Tore-Trend $goalsScore.';
+      return '$tip empfohlen: Auswärtsteam hat den klareren Formvorteil ($awayFormScore:$homeFormScore). AI $aiScore, Tore-Trend $goalsScore.';
     }
     if (tipType == TipType.draw) {
-      return '$tip empfohlen. Teams liegen eng beieinander (Differenz ${diff.abs()}). AI $aiScore.';
+      return '$tip empfohlen: beide Teams liegen eng beieinander (Differenz ${diff.abs()}). AI $aiScore.';
     }
     if (tipType == TipType.over25) {
-      return '$tip empfohlen. Hoher Tore-Trend $goalsScore/100. AI $aiScore.';
+      return '$tip empfohlen: starker Tore-Trend $goalsScore/100 und passende Offensivwerte. AI $aiScore.';
     }
     if (tipType == TipType.under25) {
-      return '$tip empfohlen. Niedriger Tore-Trend $goalsScore/100. AI $aiScore.';
+      return '$tip empfohlen: niedriger Tore-Trend $goalsScore/100, daher vorsichtiger Under-Markt. AI $aiScore.';
     }
-    return '$tip empfohlen. Beide Teams mit offensivem Potenzial. AI $aiScore, Tore-Trend $goalsScore.';
+    return '$tip empfohlen: beide Teams zeigen genug Offensivpotenzial. AI $aiScore, Tore-Trend $goalsScore.';
   }
 
   String tipLabel(TipType type) {
@@ -344,11 +379,20 @@ class PredictionEngine {
     required int headToHeadScore,
     required int tableScore,
   }) {
-    return ((formScore * 0.32) +
-        (homeAwayScore * 0.20) +
-        (goalsTrendScore * 0.20) +
-        (headToHeadScore * 0.13) +
-        (tableScore * 0.15))
+    final consistency = _consistencyScore([
+      formScore,
+      homeAwayScore,
+      goalsTrendScore,
+      headToHeadScore,
+      tableScore,
+    ]);
+
+    return ((formScore * 0.34) +
+        (homeAwayScore * 0.18) +
+        (goalsTrendScore * 0.18) +
+        (headToHeadScore * 0.12) +
+        (tableScore * 0.14) +
+        (consistency * 0.04))
         .round()
         .clamp(1, 99);
   }
@@ -358,12 +402,15 @@ class PredictionEngine {
     final away = input.awayStats.overallFormScore;
     final diff = home - away;
 
-    if (diff.abs() <= 5) return 68;
+    if (diff.abs() <= 5) return 66;
 
     final stronger = diff > 0 ? home : away;
     final weaker = diff > 0 ? away : home;
+    final diffBoost = (diff.abs() * 0.85).round().clamp(0, 18);
 
-    return ((stronger * 0.72) + ((100 - weaker) * 0.28)).round().clamp(1, 99);
+    return ((stronger * 0.66) + ((100 - weaker) * 0.22) + diffBoost)
+        .round()
+        .clamp(1, 99);
   }
 
   String _bestProTipLabel({
@@ -375,24 +422,37 @@ class PredictionEngine {
     required int tableScore,
   }) {
     final formDiff = input.formDifference;
-    final homeStrong = formDiff >= 15 && tableScore >= 56;
-    final awayStrong = formDiff <= -15 && tableScore <= 44;
-    final closeMatch = formDiff.abs() <= 6;
+    final tableSupportsHome = tableScore >= 58;
+    final tableSupportsAway = tableScore <= 42;
+    final h2hSupportsHome = headToHeadScore >= 55;
+    final h2hSupportsAway = headToHeadScore <= 45;
+    final closeMatch = formDiff.abs() <= 5;
 
-    // Zuerst klare Tor-Märkte, wenn der Trend stark ist.
-    if (goalsTrendScore >= 80 && aiScore >= 68) return 'Über 2.5';
-    if (goalsTrendScore <= 38 && aiScore >= 64) return 'Unter 2.5';
+    // Under braucht sehr klare Signale, sonst produziert die App zu viele künstliche Under-Tipps.
+    if (goalsTrendScore <= 34 && aiScore >= 66 && closeMatch) {
+      return 'Unter 2.5';
+    }
 
-    // Danach klare 1/X/2 Tipps.
-    if (homeStrong && aiScore >= 75) return '1';
-    if (awayStrong && aiScore >= 75) return '2';
+    // Over/BTTS nur dann bevorzugen, wenn der Tore-Trend wirklich trägt.
+    if (goalsTrendScore >= 82 && aiScore >= 70) return 'Über 2.5';
+    if (goalsTrendScore >= 70 && aiScore >= 66 && formDiff.abs() <= 12) {
+      return 'BTTS';
+    }
 
-    // Sicherere Märkte, wenn der Favorit nicht klar genug ist.
-    if (formDiff >= 7 && headToHeadScore >= 48) return '1X';
-    if (formDiff <= -7 && headToHeadScore <= 52) return 'X2';
+    // Klare 1/2-Tipps nur bei mehreren bestätigenden Signalen.
+    if (formDiff >= 16 && aiScore >= 76 && (tableSupportsHome || h2hSupportsHome)) {
+      return '1';
+    }
+    if (formDiff <= -16 && aiScore >= 76 && (tableSupportsAway || h2hSupportsAway)) {
+      return '2';
+    }
 
-    if (closeMatch && aiScore >= 62) return 'X';
-    if (goalsTrendScore >= 62) return 'BTTS';
+    // Sicherheitsmärkte, wenn Favorit vorhanden, aber nicht hart genug für 1/2.
+    if (formDiff >= 8 && aiScore >= 63) return '1X';
+    if (formDiff <= -8 && aiScore >= 63) return 'X2';
+
+    // X nur bei enger Partie und ohne starken Tore-Trend.
+    if (closeMatch && aiScore >= 64 && goalsTrendScore < 68) return 'X';
 
     return '12';
   }
@@ -426,11 +486,11 @@ class PredictionEngine {
   }) {
     final diff = homeFormScore - awayFormScore;
 
-    if (goalsScore >= 78) return TipType.over25;
-    if (goalsScore <= 43) return TipType.under25;
-    if (diff >= 10) return TipType.homeWin;
-    if (diff <= -10) return TipType.awayWin;
-    if (diff.abs() <= 5) return TipType.draw;
+    if (goalsScore >= 82) return TipType.over25;
+    if (goalsScore <= 36 && diff.abs() <= 8) return TipType.under25;
+    if (diff >= 14) return TipType.homeWin;
+    if (diff <= -14) return TipType.awayWin;
+    if (diff.abs() <= 5 && goalsScore < 68) return TipType.draw;
     return TipType.btts;
   }
 
@@ -451,10 +511,41 @@ class PredictionEngine {
     final tableText = input.homeStanding == null || input.awayStanding == null
         ? 'Tabelle neutral'
         : 'Tabelle ${input.homeStanding!.position}:${input.awayStanding!.position}';
+    final signal = _mainSignalText(
+      tipLabel: tipLabel,
+      formScore: formScore,
+      homeAwayScore: homeAwayScore,
+      goalsTrendScore: goalsTrendScore,
+      headToHeadScore: headToHeadScore,
+      tableScore: tableScore,
+    );
 
     return '$tipLabel empfohlen. AI $aiScore, Confidence $confidence%, Risiko $riskLevel. '
-        'Form $formText, Heim/Auswärts $homeAwayScore, Tore-Trend $goalsTrendScore, '
+        '$signal Form $formText, Heim/Auswärts $homeAwayScore, Tore-Trend $goalsTrendScore, '
         'H2H $headToHeadScore, $tableText.';
+  }
+
+  String _mainSignalText({
+    required String tipLabel,
+    required int formScore,
+    required int homeAwayScore,
+    required int goalsTrendScore,
+    required int headToHeadScore,
+    required int tableScore,
+  }) {
+    if (tipLabel == 'Über 2.5' || tipLabel == 'BTTS') {
+      return 'Hauptsignal: Tore-Trend. ';
+    }
+    if (tipLabel == 'Unter 2.5') {
+      return 'Hauptsignal: kontrollierter Spielverlauf. ';
+    }
+    if (tipLabel == '1' || tipLabel == '2' || tipLabel == '1X' || tipLabel == 'X2') {
+      return 'Hauptsignal: Form plus Tabellen-/H2H-Abgleich. ';
+    }
+    if (tipLabel == 'X') {
+      return 'Hauptsignal: ausgeglichene Kräfteverhältnisse. ';
+    }
+    return 'Hauptsignal: Sicherheitsmarkt wegen gemischter Signale. ';
   }
 
   int _derivedConfidenceFromMatch(FootballMatch match) {
@@ -467,6 +558,48 @@ class PredictionEngine {
           : match.awayFormScore,
       goalsTrendScore: match.goalsScore,
     );
+  }
+
+  bool _isPlayableMatch(FootballMatch match) {
+    if (match.aiScore < 58) return false;
+    if (match.riskLevel == 'Hoch' && match.aiScore < 78) return false;
+    if (match.odds >= 4.20) return false;
+    return true;
+  }
+
+  int _sideWinScore({
+    required int ownForm,
+    required int opponentForm,
+    required int diff,
+  }) {
+    final diffScore = (50 + (diff * 1.55)).round().clamp(25, 96);
+    return ((ownForm * 0.62) + ((100 - opponentForm) * 0.18) + (diffScore * 0.20))
+        .round()
+        .clamp(1, 99);
+  }
+
+  int _bothTeamsForm(int homeFormScore, int awayFormScore) {
+    return ((homeFormScore + awayFormScore) / 2).round().clamp(1, 99);
+  }
+
+  int _oddsQualityScore(double odds) {
+    if (odds <= 1.01) return 45;
+    if (odds <= 1.35) return 74;
+    if (odds <= 1.90) return 88;
+    if (odds <= 2.35) return 80;
+    if (odds <= 2.90) return 67;
+    if (odds <= 3.60) return 52;
+    return 38;
+  }
+
+  int _consistencyScore(List<int> values) {
+    if (values.isEmpty) return 50;
+    final average = values.reduce((a, b) => a + b) / values.length;
+    final variance = values
+        .map((value) => (value - average).abs())
+        .fold<double>(0, (sum, value) => sum + value) /
+        values.length;
+    return (100 - (variance * 1.8)).round().clamp(35, 96);
   }
 
   int _stableScore(String seed, {required int min, required int max}) {
