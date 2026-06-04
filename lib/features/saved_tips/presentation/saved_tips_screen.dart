@@ -206,11 +206,11 @@ class _SavedSummary extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.workspace_premium_rounded, color: Colors.white),
-              SizedBox(width: 10),
-              Expanded(
+              const Icon(Icons.workspace_premium_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              const Expanded(
                 child: Text(
                   'Gespeicherte Auswahl',
                   style: TextStyle(
@@ -220,34 +220,32 @@ class _SavedSummary extends StatelessWidget {
                   ),
                 ),
               ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  'Ø Final ${stats.averageFinal.toStringAsFixed(1)}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${stats.count} gespeicherte Tipps · Ø AI ${stats.averageAi.toStringAsFixed(0)}%',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.78),
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _SummaryTile(
-                  label: 'Tipps',
-                  value: '${stats.count}',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _SummaryTile(
-                  label: 'Ø AI',
-                  value: '${stats.averageAi.toStringAsFixed(0)}%',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _SummaryTile(
-                  label: 'Ø Final',
-                  value: stats.averageFinal.toStringAsFixed(1),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
@@ -261,6 +259,17 @@ class _SavedSummary extends StatelessWidget {
                 child: _SummaryTile(
                   label: 'Value',
                   value: '${stats.valueCount}',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _SummaryTile(
+                  label: 'Beobachten',
+                  value: '${stats.watchCount}',
                 ),
               ),
               const SizedBox(width: 10),
@@ -506,7 +515,7 @@ class _SavedTipCard extends StatelessWidget {
               const SizedBox(height: 12),
               Text(
                 _reasonText(match, score, value, decision),
-                maxLines: 3,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: Colors.grey.shade800,
@@ -537,11 +546,12 @@ class _SavedTipCard extends StatelessWidget {
       _SavedTipDecision decision,
       ) {
     final valueText = value.isValueBet
-        ? ' Value +${value.edgePercent.toStringAsFixed(1)}%.'
+        ? ' · Value +${value.edgePercent.toStringAsFixed(1)}%'
         : '';
+    final baseReason = match.shortReason.trim();
+    final reason = baseReason.isEmpty ? decision.reason : baseReason;
 
-    final reason = match.shortReason.trim();
-    return '${decision.label}: ${match.tipLabel} gespeichert. Final ${score.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${score.confidence.toStringAsFixed(0)}%, Risiko ${match.riskLevel}.$valueText ${reason.isEmpty ? decision.reason : reason}';
+    return '${decision.label}: ${match.tipLabel} · Final ${score.finalScore.toStringAsFixed(1)} · AI ${match.aiScore}% · Conf ${score.confidence.toStringAsFixed(0)}%$valueText. $reason';
   }
 }
 
