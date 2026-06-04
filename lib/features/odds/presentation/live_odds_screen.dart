@@ -37,7 +37,7 @@ enum _OddsDecision {
 }
 
 class _LiveOddsScreenState extends State<LiveOddsScreen> {
-  final LiveOddsService _oddsService = const LiveOddsService();
+  final LiveOddsService _oddsService = LiveOddsService();
 
   late Future<List<LiveOdds>> _future;
   _OddsFilter _filter = _OddsFilter.all;

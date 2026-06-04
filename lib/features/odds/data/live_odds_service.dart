@@ -1,111 +1,336 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
+import 'package:kickmind_ai/core/config/api_config.dart';
 import 'package:kickmind_ai/features/odds/domain/live_odds.dart';
 
 class LiveOddsService {
-  static const String apiKey = 'DEIN_ODDS_API_KEY';
+  LiveOddsService({
+    http.Client? client,
+    this.days = 7,
+    this.bookmakerPriority = const <String>[
+      'Bet365',
+      'Pinnacle',
+      'Unibet',
+      'Betfair',
+      'William Hill',
+      '1xBet',
+    ],
+  }) : _client = client ?? http.Client();
 
-  /// The Odds API sport keys examples:
-  /// soccer_epl, soccer_germany_bundesliga, soccer_spain_la_liga,
-  /// soccer_italy_serie_a, soccer_france_ligue_one.
-  final String sportKey;
-  final String regions;
-  final String markets;
+  final http.Client _client;
+  final int days;
+  final List<String> bookmakerPriority;
 
-  const LiveOddsService({
-    this.sportKey = 'soccer_epl',
-    this.regions = 'eu',
-    this.markets = 'h2h,totals',
-  });
+  static final Map<String, List<LiveOdds>> _cache = <String, List<LiveOdds>>{};
+  static final Map<String, DateTime> _cacheTime = <String, DateTime>{};
+  static final Map<String, _FixtureTeams> _fixtureTeamsCache = <String, _FixtureTeams>{};
 
-  Future<List<LiveOdds>> fetchLiveOdds() async {
-    if (apiKey == 'DEIN_ODDS_API_KEY') {
+  static const Duration _cacheDuration = Duration(minutes: 20);
+
+  Future<List<LiveOdds>> fetchLiveOdds({bool forceRefresh = false}) async {
+    if (!ApiConfig.hasFootballApiKey) {
       return <LiveOdds>[];
     }
 
-    final uri = Uri.https(
-      'api.the-odds-api.com',
-      '/v4/sports/$sportKey/odds',
-      {
-        'apiKey': apiKey,
-        'regions': regions,
-        'markets': markets,
-        'oddsFormat': 'decimal',
-      },
+    final normalizedToday = _dateOnly(DateTime.now());
+    final safeDays = days < 1 ? 1 : days;
+    final cacheKey = '${_formatDate(normalizedToday)}_$safeDays';
+    final now = DateTime.now();
+
+    if (!forceRefresh && _cache.containsKey(cacheKey)) {
+      final cachedAt = _cacheTime[cacheKey];
+      if (cachedAt != null && now.difference(cachedAt) < _cacheDuration) {
+        return _cache[cacheKey]!;
+      }
+    }
+
+    final result = <LiveOdds>[];
+
+    for (var offset = 0; offset < safeDays; offset++) {
+      final day = normalizedToday.add(Duration(days: offset));
+      result.addAll(await _fetchOddsForDate(day));
+    }
+
+    final unique = <String, LiveOdds>{};
+    for (final odds in result) {
+      if (odds.matchId.isEmpty) continue;
+      unique[odds.matchId] = odds;
+    }
+
+    final sorted = unique.values.toList()
+      ..sort((a, b) {
+        final updatedCompare = b.updatedAt.compareTo(a.updatedAt);
+        if (updatedCompare != 0) return updatedCompare;
+        return '${a.homeTeam} ${a.awayTeam}'.compareTo('${b.homeTeam} ${b.awayTeam}');
+      });
+
+    _cache[cacheKey] = sorted;
+    _cacheTime[cacheKey] = DateTime.now();
+    return sorted;
+  }
+
+  Future<List<LiveOdds>> _fetchOddsForDate(DateTime date) async {
+    final uri = Uri.parse(
+      '${ApiConfig.footballBaseUrl}/odds?date=${_formatDate(date)}',
     );
 
     try {
-      final response = await http.get(uri);
+      final response = await _client.get(
+        uri,
+        headers: <String, String>{
+          'x-apisports-key': ApiConfig.footballApiKey,
+        },
+      ).timeout(const Duration(seconds: 14));
+
       if (response.statusCode != 200) return <LiveOdds>[];
 
       final decoded = jsonDecode(response.body);
-      if (decoded is! List) return <LiveOdds>[];
+      if (decoded is! Map<String, dynamic>) return <LiveOdds>[];
 
-      return decoded.map<LiveOdds?>((raw) {
-        if (raw is! Map<String, dynamic>) return null;
+      final rawResponse = decoded['response'];
+      if (rawResponse is! List || rawResponse.isEmpty) return <LiveOdds>[];
 
-        final bookmakers = raw['bookmakers'];
-        if (bookmakers is! List || bookmakers.isEmpty) return null;
-
-        final bookmaker = bookmakers.first as Map<String, dynamic>;
-        final marketsRaw = bookmaker['markets'];
-        if (marketsRaw is! List) return null;
-
-        double? home;
-        double? draw;
-        double? away;
-        double? over25;
-        double? under25;
-
-        for (final marketRaw in marketsRaw) {
-          if (marketRaw is! Map<String, dynamic>) continue;
-          final key = marketRaw['key']?.toString();
-          final outcomes = marketRaw['outcomes'];
-          if (outcomes is! List) continue;
-
-          if (key == 'h2h') {
-            for (final outcomeRaw in outcomes) {
-              if (outcomeRaw is! Map<String, dynamic>) continue;
-              final name = outcomeRaw['name']?.toString() ?? '';
-              final price = (outcomeRaw['price'] as num?)?.toDouble();
-              if (price == null) continue;
-
-              if (name == raw['home_team']?.toString()) home = price;
-              if (name == raw['away_team']?.toString()) away = price;
-              if (name.toLowerCase() == 'draw') draw = price;
-            }
-          }
-
-          if (key == 'totals') {
-            for (final outcomeRaw in outcomes) {
-              if (outcomeRaw is! Map<String, dynamic>) continue;
-              final name = outcomeRaw['name']?.toString().toLowerCase() ?? '';
-              final point = (outcomeRaw['point'] as num?)?.toDouble();
-              final price = (outcomeRaw['price'] as num?)?.toDouble();
-              if (point == null || price == null) continue;
-              if (point == 2.5 && name == 'over') over25 = price;
-              if (point == 2.5 && name == 'under') under25 = price;
-            }
-          }
-        }
-
-        if (home == null || draw == null || away == null) return null;
-
-        return LiveOdds(
-          matchId: raw['id']?.toString() ?? '',
-          homeTeam: raw['home_team']?.toString() ?? '',
-          awayTeam: raw['away_team']?.toString() ?? '',
-          homeWin: home,
-          draw: draw,
-          awayWin: away,
-          over25: over25,
-          under25: under25,
-          bookmaker: bookmaker['title']?.toString() ?? 'Bookmaker',
-          updatedAt: DateTime.tryParse(bookmaker['last_update']?.toString() ?? '') ?? DateTime.now(),
-        );
-      }).whereType<LiveOdds>().toList();
+      final list = <LiveOdds>[];
+      for (final item in rawResponse) {
+        if (item is! Map<String, dynamic>) continue;
+        final parsed = await _parseFixtureOdds(item);
+        if (parsed != null) list.add(parsed);
+      }
+      return list;
     } catch (_) {
       return <LiveOdds>[];
     }
   }
+
+  Future<LiveOdds?> _parseFixtureOdds(Map<String, dynamic> raw) async {
+    final fixture = _asMap(raw['fixture']);
+    final bookmakersRaw = raw['bookmakers'];
+    if (fixture == null || bookmakersRaw is! List || bookmakersRaw.isEmpty) {
+      return null;
+    }
+
+    final selectedBookmaker = _selectBookmaker(bookmakersRaw);
+    if (selectedBookmaker == null) return null;
+
+    final betsRaw = selectedBookmaker['bets'];
+    if (betsRaw is! List) return null;
+
+    double? home;
+    double? draw;
+    double? away;
+    double? over25;
+    double? under25;
+    double? bttsYes;
+
+    for (final betRaw in betsRaw) {
+      final bet = _asMap(betRaw);
+      if (bet == null) continue;
+
+      final betName = bet['name']?.toString().toLowerCase().trim() ?? '';
+      final valuesRaw = bet['values'];
+      if (valuesRaw is! List) continue;
+
+      if (_isMatchWinnerBet(betName)) {
+        for (final valueRaw in valuesRaw) {
+          final value = _asMap(valueRaw);
+          if (value == null) continue;
+          final label = value['value']?.toString().toLowerCase().trim() ?? '';
+          final odd = _readOdd(value['odd']);
+          if (odd == null) continue;
+
+          if (label == 'home' || label == '1') home = odd;
+          if (label == 'draw' || label == 'x') draw = odd;
+          if (label == 'away' || label == '2') away = odd;
+        }
+      }
+
+      if (_isGoalsBet(betName)) {
+        for (final valueRaw in valuesRaw) {
+          final value = _asMap(valueRaw);
+          if (value == null) continue;
+          final label = value['value']?.toString().toLowerCase().trim() ?? '';
+          final odd = _readOdd(value['odd']);
+          if (odd == null) continue;
+
+          if (_isOver25(label)) over25 = odd;
+          if (_isUnder25(label)) under25 = odd;
+        }
+      }
+
+      if (_isBttsBet(betName)) {
+        for (final valueRaw in valuesRaw) {
+          final value = _asMap(valueRaw);
+          if (value == null) continue;
+          final label = value['value']?.toString().toLowerCase().trim() ?? '';
+          final odd = _readOdd(value['odd']);
+          if (odd == null) continue;
+
+          if (label == 'yes' || label == 'ja') bttsYes = odd;
+        }
+      }
+    }
+
+    if (home == null || draw == null || away == null) return null;
+
+    final fixtureId = fixture['id']?.toString() ?? '';
+    if (fixtureId.isEmpty) return null;
+
+    final teamsFromOdds = _readTeamsFromOddsPayload(raw);
+    final teams = teamsFromOdds ?? await _fetchFixtureTeams(fixtureId);
+    final homeTeam = teams?.home.trim().isNotEmpty == true ? teams!.home.trim() : 'Heimteam $fixtureId';
+    final awayTeam = teams?.away.trim().isNotEmpty == true ? teams!.away.trim() : 'Auswärtsteam $fixtureId';
+
+    return LiveOdds(
+      matchId: fixtureId,
+      homeTeam: homeTeam,
+      awayTeam: awayTeam,
+      homeWin: home,
+      draw: draw,
+      awayWin: away,
+      over25: over25,
+      under25: under25,
+      bttsYes: bttsYes,
+      bookmaker: selectedBookmaker['name']?.toString() ?? 'Bookmaker',
+      updatedAt: DateTime.tryParse(raw['update']?.toString() ?? '') ?? DateTime.now(),
+    );
+  }
+
+  _FixtureTeams? _readTeamsFromOddsPayload(Map<String, dynamic> raw) {
+    final teams = _asMap(raw['teams']);
+    final home = _asMap(teams?['home'])?['name']?.toString().trim();
+    final away = _asMap(teams?['away'])?['name']?.toString().trim();
+    if (home == null || away == null || home.isEmpty || away.isEmpty) {
+      return null;
+    }
+    return _FixtureTeams(home: home, away: away);
+  }
+
+  Future<_FixtureTeams?> _fetchFixtureTeams(String fixtureId) async {
+    final cached = _fixtureTeamsCache[fixtureId];
+    if (cached != null) return cached;
+
+    final uri = Uri.parse('${ApiConfig.footballBaseUrl}/fixtures?id=$fixtureId');
+
+    try {
+      final response = await _client.get(
+        uri,
+        headers: <String, String>{
+          'x-apisports-key': ApiConfig.footballApiKey,
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) return null;
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return null;
+
+      final rawResponse = decoded['response'];
+      if (rawResponse is! List || rawResponse.isEmpty) return null;
+
+      final first = _asMap(rawResponse.first);
+      final teams = _asMap(first?['teams']);
+      final home = _asMap(teams?['home'])?['name']?.toString().trim();
+      final away = _asMap(teams?['away'])?['name']?.toString().trim();
+
+      if (home == null || away == null || home.isEmpty || away.isEmpty) {
+        return null;
+      }
+
+      final fixtureTeams = _FixtureTeams(home: home, away: away);
+      _fixtureTeamsCache[fixtureId] = fixtureTeams;
+      return fixtureTeams;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic>? _selectBookmaker(List<dynamic> bookmakersRaw) {
+    final bookmakers = bookmakersRaw
+        .map(_asMap)
+        .whereType<Map<String, dynamic>>()
+        .where((bookmaker) => bookmaker['bets'] is List)
+        .toList();
+
+    if (bookmakers.isEmpty) return null;
+
+    for (final preferred in bookmakerPriority) {
+      final preferredLower = preferred.toLowerCase();
+      for (final bookmaker in bookmakers) {
+        final name = bookmaker['name']?.toString().toLowerCase() ?? '';
+        if (name.contains(preferredLower)) return bookmaker;
+      }
+    }
+
+    return bookmakers.first;
+  }
+
+  bool _isMatchWinnerBet(String name) {
+    return name == 'match winner' ||
+        name == '1x2' ||
+        name == 'fulltime result' ||
+        name.contains('match winner');
+  }
+
+  bool _isGoalsBet(String name) {
+    return name == 'goals over/under' ||
+        name == 'over/under' ||
+        name.contains('goals over') ||
+        name.contains('over/under');
+  }
+
+  bool _isBttsBet(String name) {
+    return name == 'both teams score' ||
+        name == 'both teams to score' ||
+        name.contains('both teams');
+  }
+
+  bool _isOver25(String label) {
+    return label == 'over 2.5' ||
+        label == 'over 2,5' ||
+        label == 'o 2.5' ||
+        label.contains('over 2.5') ||
+        label.contains('over 2,5');
+  }
+
+  bool _isUnder25(String label) {
+    return label == 'under 2.5' ||
+        label == 'under 2,5' ||
+        label == 'u 2.5' ||
+        label.contains('under 2.5') ||
+        label.contains('under 2,5');
+  }
+
+  double? _readOdd(Object? raw) {
+    if (raw is num) return raw.toDouble();
+    if (raw == null) return null;
+    final text = raw.toString().replaceAll(',', '.').trim();
+    final parsed = double.tryParse(text);
+    if (parsed == null || parsed <= 1.0) return null;
+    return parsed;
+  }
+
+  Map<String, dynamic>? _asMap(Object? raw) {
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return null;
+  }
+
+  DateTime _dateOnly(DateTime value) => DateTime(value.year, value.month, value.day);
+
+  String _formatDate(DateTime value) {
+    return '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
+  }
+}
+
+class _FixtureTeams {
+  const _FixtureTeams({
+    required this.home,
+    required this.away,
+  });
+
+  final String home;
+  final String away;
 }
