@@ -94,12 +94,53 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
     return Scaffold(
       backgroundColor: KickMindTheme.background,
       appBar: AppBar(
-        title: const Text('KickMind AI'),
+        backgroundColor: const Color(0xFF061B2E),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        titleSpacing: 20,
+        toolbarHeight: 86,
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'KickMind AI',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 26,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.3,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${_range.label} · AI Radar',
+              style: const TextStyle(
+                color: Color(0xB3FFFFFF),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.1,
+              ),
+            ),
+          ],
+        ),
         actions: [
-          IconButton(
-            tooltip: 'Aktualisieren',
-            onPressed: _reload,
-            icon: const Icon(Icons.refresh_rounded),
+          Padding(
+            padding: const EdgeInsets.only(right: 14),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0x1FFFFFFF),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0x26FFFFFF)),
+              ),
+              child: IconButton(
+                tooltip: 'Aktualisieren',
+                onPressed: _reload,
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+            ),
           ),
         ],
       ),
@@ -132,7 +173,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
             return RefreshIndicator(
               onRefresh: () async => _reload(),
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
                 children: [
                   _StartHero(
                     rangeLabel: _range.label,
@@ -658,7 +699,7 @@ class _TopTipMiniCard extends StatelessWidget {
                 '${score.isValueBet ? '💰 ' : ''}${match.teamsLabel}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+                style: const TextStyle(color: Color(0xFF111827), fontWeight: FontWeight.w900, fontSize: 15),
               ),
             ),
             const SizedBox(width: 8),
@@ -781,7 +822,7 @@ class _LoadingState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
       children: const [
         _SkeletonBox(height: 150),
         SizedBox(height: 14),

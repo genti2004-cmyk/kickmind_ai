@@ -300,8 +300,28 @@ class _LiveOddsEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(24, 96, 24, 120),
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 120),
       children: [
+        const Text(
+          'Live Quoten',
+          style: TextStyle(
+            color: Color(0xFF111827),
+            fontSize: 28,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.6,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Value, Risiko und Final Score werden automatisch berechnet, sobald Live-Odds verfügbar sind.',
+          style: TextStyle(
+            color: Color(0xFF6B7280),
+            fontSize: 14,
+            height: 1.35,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 24),
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -342,11 +362,11 @@ class _LiveOddsEmptyState extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Text(
+              const Text(
                 'Die Quoten-Seite ist bereit. Sobald dein Odds-API-Key aktiv ist, werden hier Value, Risiko und Final Score automatisch berechnet.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.grey.shade700,
+                  color: Color(0xFF6B7280),
                   height: 1.35,
                   fontWeight: FontWeight.w600,
                 ),
