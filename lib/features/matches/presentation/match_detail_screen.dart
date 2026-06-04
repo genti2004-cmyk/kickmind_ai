@@ -75,6 +75,11 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       backgroundColor: KickMindTheme.background,
       appBar: AppBar(
         title: const Text('Pro Analyse'),
+        backgroundColor: const Color(0xFF061B2D),
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        elevation: 0,
         actions: [
           IconButton(
             tooltip: _saved ? 'Tipp entfernen' : 'Tipp speichern',
@@ -87,7 +92,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 118),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 156),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -156,7 +161,10 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                   children: [
                     Text(
                       'Einsatz: ${_stake.toStringAsFixed(0)} €',
-                      style: const TextStyle(fontWeight: FontWeight.w900),
+                      style: const TextStyle(
+                        color: Color(0xFF111827),
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                     Slider(
                       min: 5,
@@ -790,12 +798,22 @@ class _StatTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: KickMindTheme.primary, size: 20),
-          const SizedBox(height: 8),
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: KickMindTheme.primary.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: KickMindTheme.primary, size: 19),
+          ),
+          const SizedBox(height: 10),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              color: KickMindTheme.textMuted,
+              color: Color(0xFF6B7280),
               fontSize: 12,
               fontWeight: FontWeight.w800,
             ),
@@ -805,7 +823,11 @@ class _StatTile extends StatelessWidget {
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
+            style: const TextStyle(
+              color: Color(0xFF111827),
+              fontSize: 21,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ],
       ),
@@ -834,7 +856,13 @@ class _InfoRow extends StatelessWidget {
               ),
             ),
           ),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF111827),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
         ],
       ),
     );
@@ -926,7 +954,11 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+      style: const TextStyle(
+        color: Color(0xFF111827),
+        fontSize: 18,
+        fontWeight: FontWeight.w900,
+      ),
     );
   }
 }
