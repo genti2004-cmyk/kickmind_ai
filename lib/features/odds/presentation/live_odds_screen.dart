@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:kickmind_ai/core/scoring/odds_score_service.dart';
+import 'package:kickmind_ai/features/matches/data/repositories/match_repository_impl.dart';
+import 'package:kickmind_ai/features/matches/domain/match_date_range.dart';
 import 'package:kickmind_ai/features/odds/data/live_odds_service.dart';
 import 'package:kickmind_ai/features/odds/domain/live_odds.dart';
 
@@ -12,13 +14,16 @@ class LiveOddsScreen extends StatefulWidget {
 
 class _LiveOddsScreenState extends State<LiveOddsScreen> {
   final LiveOddsService _oddsService = LiveOddsService();
+  final MatchRepositoryImpl _matchRepository = MatchRepositoryImpl();
 
   late Future<List<LiveOdds>> _future;
+  late Future<_FixtureSourceSummary> _fixtureSourceFuture;
 
   @override
   void initState() {
     super.initState();
     _future = _load();
+    _fixtureSourceFuture = _loadFixtureSourceSummary();
   }
 
   bool _lastLoadFailed = false;
@@ -37,9 +42,30 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
     }
   }
 
+  Future<_FixtureSourceSummary> _loadFixtureSourceSummary() async {
+    try {
+      final results = await Future.wait([
+        _matchRepository.getMatches(range: MatchDateRange.today),
+        _matchRepository.getMatches(range: MatchDateRange.tomorrow),
+        _matchRepository.getMatches(range: MatchDateRange.next3Days),
+        _matchRepository.getMatches(range: MatchDateRange.next7Days),
+      ]);
+
+      return _FixtureSourceSummary(
+        today: results[0].length,
+        tomorrow: results[1].length,
+        next3Days: results[2].length,
+        next7Days: results[3].length,
+      );
+    } catch (_) {
+      return const _FixtureSourceSummary.empty();
+    }
+  }
+
   Future<void> _refresh() async {
     setState(() {
       _future = _load(forceRefresh: true);
+      _fixtureSourceFuture = _loadFixtureSourceSummary();
     });
   }
 
@@ -130,6 +156,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
                 onRefresh: _refresh,
                 loadFailed: snapshot.hasError || _lastLoadFailed,
                 diagnostics: _lastDiagnostics,
+                fixtureSourceFuture: _fixtureSourceFuture,
               );
             }
 
@@ -341,11 +368,13 @@ class _LiveOddsEmptyState extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final bool loadFailed;
   final LiveOddsFetchDiagnostics? diagnostics;
+  final Future<_FixtureSourceSummary> fixtureSourceFuture;
 
   const _LiveOddsEmptyState({
     required this.onRefresh,
     required this.loadFailed,
     required this.diagnostics,
+    required this.fixtureSourceFuture,
   });
 
   @override
@@ -453,6 +482,8 @@ class _LiveOddsEmptyState extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 14),
+              _FixtureSourceComparisonCard(future: fixtureSourceFuture),
               if (diagnostics != null) ...[
                 const SizedBox(height: 14),
                 _LiveOddsDiagnosticsBox(diagnostics: diagnostics!),
@@ -474,6 +505,104 @@ class _LiveOddsEmptyState extends StatelessWidget {
   }
 }
 
+
+
+class _FixtureSourceSummary {
+  final int today;
+  final int tomorrow;
+  final int next3Days;
+  final int next7Days;
+
+  const _FixtureSourceSummary({
+    required this.today,
+    required this.tomorrow,
+    required this.next3Days,
+    required this.next7Days,
+  });
+
+  const _FixtureSourceSummary.empty()
+      : today = 0,
+        tomorrow = 0,
+        next3Days = 0,
+        next7Days = 0;
+
+  bool get hasMatches => today > 0 || tomorrow > 0 || next3Days > 0 || next7Days > 0;
+}
+
+class _FixtureSourceComparisonCard extends StatelessWidget {
+  final Future<_FixtureSourceSummary> future;
+
+  const _FixtureSourceComparisonCard({required this.future});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_FixtureSourceSummary>(
+      future: future,
+      builder: (context, snapshot) {
+        final summary = snapshot.data ?? const _FixtureSourceSummary.empty();
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEFF6FF),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFBFDBFE)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(
+                    Icons.compare_arrows_rounded,
+                    size: 18,
+                    color: Color(0xFF176CC7),
+                  ),
+                  SizedBox(width: 7),
+                  Text(
+                    'Datenquellen-Vergleich',
+                    style: TextStyle(
+                      color: Color(0xFF0B4EA2),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (snapshot.connectionState == ConnectionState.waiting)
+                const Text(
+                  'Prüfe Spielequelle ...',
+                  style: TextStyle(
+                    color: Color(0xFF1F2937),
+                    fontWeight: FontWeight.w800,
+                  ),
+                )
+              else ...[
+                _DiagnosticLine(label: 'Heute', value: '${summary.today} Spiele'),
+                _DiagnosticLine(label: 'Morgen', value: '${summary.tomorrow} Spiele'),
+                _DiagnosticLine(label: '3 Tage', value: '${summary.next3Days} Spiele'),
+                _DiagnosticLine(label: 'Woche', value: '${summary.next7Days} Spiele'),
+                const SizedBox(height: 8),
+                Text(
+                  summary.hasMatches
+                      ? 'Diese Spiele kommen aus der Match-/Analyse-Quelle. Live Quoten nutzt separat den API-Football-Odds-Endpunkt. Deshalb können Spiele sichtbar sein, obwohl Live-Odds leer sind.'
+                      : 'Auch die Match-/Analyse-Quelle liefert aktuell keine sichtbaren Spiele.',
+                  style: const TextStyle(
+                    color: Color(0xFF1E3A8A),
+                    fontWeight: FontWeight.w800,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
 
 class _LiveOddsDiagnosticsBox extends StatelessWidget {
   final LiveOddsFetchDiagnostics diagnostics;
