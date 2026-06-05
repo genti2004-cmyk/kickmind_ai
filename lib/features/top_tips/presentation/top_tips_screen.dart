@@ -771,46 +771,6 @@ class _MiniScorePill extends StatelessWidget {
   }
 }
 
-class _InfoPill extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _InfoPill({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.82),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withOpacity(0.9)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '$label ',
-            style: const TextStyle(
-              color: KickMindTheme.textMuted,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: KickMindTheme.textDark,
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _CompactTipCard extends StatelessWidget {
   final FootballMatch match;
   final double finalScore;
