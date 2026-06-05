@@ -91,13 +91,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             onRefresh: _refresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 118),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
               children: [
                 _AnalysisRangeSelector(
                   selected: _range,
                   onChanged: _setRange,
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
                 _AnalysisHero(
                   rangeLabel: _range.label,
                   matchesCount: ranked.length,
@@ -110,7 +110,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                   bestValueEdge: _valueEdge(ranked.first),
                   avgFinalScore: avgFinal,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 _MetricGrid(
                   children: [
                     _MetricCard(
@@ -139,11 +139,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 _SectionTitle(
                   icon: Icons.auto_graph_rounded,
                   title: 'Finales Analyse-Ranking',
-                  subtitle: 'Dieselbe Premium-, Value-, Beobachten- und No-Bet-Logik wie bei Top Tipps.',
+                  subtitle: 'Kompaktes Ranking nach Final Score, Risiko und Value.',
                 ),
                 const SizedBox(height: 12),
                 ...ranked.take(5).map(
@@ -163,7 +163,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                   _SectionTitle(
                     icon: Icons.workspace_premium_rounded,
                     title: 'Premium Top Tipps',
-                    subtitle: 'Starke Kombination aus AI, Final Score, Risiko und Quote.',
+                    subtitle: 'Stärkste Kombination aus Score, Risiko und Quote.',
                   ),
                   const SizedBox(height: 12),
                   ...buckets.premium.take(4).map(
@@ -182,7 +182,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                   _SectionTitle(
                     icon: Icons.trending_up_rounded,
                     title: 'Value Chancen',
-                    subtitle: 'Positive Edge, aber noch nicht automatisch Premium.',
+                    subtitle: 'Positive Edge, aber noch nicht Premium.',
                   ),
                   const SizedBox(height: 12),
                   ...buckets.value.take(4).map(
@@ -201,7 +201,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                   _SectionTitle(
                     icon: Icons.visibility_rounded,
                     title: 'Beobachten',
-                    subtitle: 'Solide Ansätze, aber Final Score oder Risiko noch nicht stark genug.',
+                    subtitle: 'Solide Ansätze mit Beobachtungsstatus.',
                   ),
                   const SizedBox(height: 12),
                   ...buckets.watch.take(4).map(
@@ -220,7 +220,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                   _SectionTitle(
                     icon: Icons.block_rounded,
                     title: 'No Bet / Risiko-Warnung',
-                    subtitle: 'Zu wenig Edge, zu hohes Risiko oder zu schwacher Final Score.',
+                    subtitle: 'Aktuell kein klares Value-Signal.',
                   ),
                   const SizedBox(height: 12),
                   ...buckets.noBet.take(5).map(
@@ -299,10 +299,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   int _compareByFinalScore(FootballMatch a, FootballMatch b) {
     return _scoreService.compareByFinalScore(a, b);
   }
-
-
-
-
 
   double _finalScore(FootballMatch match) {
     return _scoreService.score(match).finalScore;
@@ -415,10 +411,10 @@ class _AnalysisHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: KickMindTheme.primary,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
             color: KickMindTheme.primary.withOpacity(0.20),
@@ -433,11 +429,11 @@ class _AnalysisHero extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(15),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Icon(Icons.analytics_rounded, color: Colors.white),
               ),
@@ -451,12 +447,12 @@ class _AnalysisHero extends StatelessWidget {
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w900,
-                        fontSize: 18,
+                        fontSize: 15,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '$matchesCount Spiele analysiert · $premiumCount Premium · $valueCount Value · $watchCount Beobachten · $noBetCount Risiko',
+                      '$matchesCount Spiele · $premiumCount Premium · $valueCount Value · $watchCount Watch · $noBetCount No Bet',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.78),
                         fontWeight: FontWeight.w800,
@@ -467,7 +463,7 @@ class _AnalysisHero extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Text(
             bestMatch.teamsLabel,
             maxLines: 1,
@@ -475,10 +471,10 @@ class _AnalysisHero extends StatelessWidget {
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w900,
-              fontSize: 20,
+              fontSize: 18,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -503,7 +499,7 @@ class _HeroPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.16),
         borderRadius: BorderRadius.circular(999),
@@ -531,7 +527,7 @@ class _MetricGrid extends StatelessWidget {
       crossAxisCount: 2,
       crossAxisSpacing: 10,
       mainAxisSpacing: 10,
-      childAspectRatio: 1.72,
+      childAspectRatio: 1.95,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       children: children,
@@ -555,7 +551,7 @@ class _MetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -564,13 +560,13 @@ class _MetricCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 38,
-            height: 38,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               color: color.withOpacity(0.10),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(icon, color: color, size: 20),
+            child: Icon(icon, color: color, size: 18),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -596,7 +592,7 @@ class _MetricCard extends StatelessWidget {
                   style: const TextStyle(
                     color: KickMindTheme.textDark,
                     fontWeight: FontWeight.w900,
-                    fontSize: 20,
+                    fontSize: 18,
                   ),
                 ),
               ],
@@ -625,13 +621,13 @@ class _SectionTitle extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 42,
-          height: 42,
+          width: 38,
+          height: 38,
           decoration: BoxDecoration(
             color: KickMindTheme.primary.withOpacity(0.10),
             borderRadius: BorderRadius.circular(15),
           ),
-          child: Icon(icon, color: KickMindTheme.primary, size: 22),
+          child: Icon(icon, color: KickMindTheme.primary, size: 20),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -642,7 +638,7 @@ class _SectionTitle extends StatelessWidget {
                 title,
                 style: const TextStyle(
                   color: KickMindTheme.textDark,
-                  fontSize: 21,
+                  fontSize: 19,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -691,13 +687,13 @@ class _AnalysisTipTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: InkWell(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(22),
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(22),
             border: Border.all(
               color: rank == 1
                   ? KickMindTheme.primary.withOpacity(0.28)
@@ -710,8 +706,8 @@ class _AnalysisTipTile extends StatelessWidget {
               Row(
                 children: [
                   Container(
-                    width: 36,
-                    height: 36,
+                    width: 34,
+                    height: 34,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: rank == 1 ? KickMindTheme.primary : KickMindTheme.primary.withOpacity(0.10),
@@ -757,7 +753,7 @@ class _AnalysisTipTile extends StatelessWidget {
                   const Icon(Icons.chevron_right_rounded, color: KickMindTheme.textMuted),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -864,8 +860,8 @@ class _SimpleInfoTile extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: iconColor.withOpacity(0.10),
                   borderRadius: BorderRadius.circular(15),
@@ -921,7 +917,7 @@ class _SmallPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
       decoration: BoxDecoration(
         color: color.withOpacity(0.10),
         borderRadius: BorderRadius.circular(999),
