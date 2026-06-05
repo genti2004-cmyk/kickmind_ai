@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/core/scoring/odds_score_service.dart';
 import 'package:kickmind_ai/core/scoring/top_tip_score_service.dart';
 import 'package:kickmind_ai/core/theme/kickmind_theme.dart';
 import 'package:kickmind_ai/features/matches/data/repositories/match_repository_impl.dart';
@@ -145,7 +146,6 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                         (match) => _CompactTipCard(
                       match: match,
                       finalScore: _finalScore(match),
-                      valueEdge: _valueEdge(match),
                       onTap: () => _openDetail(match),
                     ),
                   ),
@@ -162,7 +162,6 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                         (match) => _CompactTipCard(
                       match: match,
                       finalScore: _finalScore(match),
-                      valueEdge: _valueEdge(match),
                       onTap: () => _openDetail(match),
                     ),
                   ),
@@ -459,6 +458,7 @@ class _TopTipCard extends StatelessWidget {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
     final riskColor = KickMindTheme.riskColor(match.riskLevel);
     final cardReason = _buildCardReason();
+    final oddsRelevance = _TopTipOddsRelevance.fromMatch(match);
 
     return InkWell(
       onTap: onTap,
@@ -550,6 +550,8 @@ class _TopTipCard extends StatelessWidget {
               color: scoreColor,
             ),
             const SizedBox(height: 12),
+            _TopTipOddsPanel(relevance: oddsRelevance),
+            const SizedBox(height: 12),
             Text(
               cardReason,
               maxLines: 2,
@@ -587,27 +589,244 @@ class _TopTipCard extends StatelessWidget {
   }
 }
 
+
+class _TopTipOddsRelevance {
+  final String marketLabel;
+  final double oddsValue;
+  final OddsMarketScore score;
+  final OddsMarketDecision decision;
+
+  const _TopTipOddsRelevance({
+    required this.marketLabel,
+    required this.oddsValue,
+    required this.score,
+    required this.decision,
+  });
+
+  factory _TopTipOddsRelevance.fromMatch(FootballMatch match) {
+    final marketType = _marketTypeForTip(match.tipType);
+    final margin = _estimatedMarginFor(match.odds);
+    final score = OddsScoreService.instance.evaluate(
+      oddsValue: match.odds,
+      margin: margin,
+      marketType: marketType,
+    );
+    final decision = OddsScoreService.instance.decisionFor(
+      finalScore: score.finalScore,
+      valueEdge: score.valueEdge,
+      confidence: score.confidence,
+      riskLevel: score.riskLevel,
+      oddsValue: match.odds,
+    );
+
+    return _TopTipOddsRelevance(
+      marketLabel: _marketLabelFor(match),
+      oddsValue: match.odds,
+      score: score,
+      decision: decision,
+    );
+  }
+
+  static OddsMarketType _marketTypeForTip(TipType tipType) {
+    switch (tipType) {
+      case TipType.homeWin:
+        return OddsMarketType.home;
+      case TipType.draw:
+        return OddsMarketType.draw;
+      case TipType.awayWin:
+        return OddsMarketType.away;
+      case TipType.over25:
+        return OddsMarketType.over25;
+      case TipType.under25:
+        return OddsMarketType.under25;
+      case TipType.btts:
+        return OddsMarketType.btts;
+    }
+  }
+
+  static String _marketLabelFor(FootballMatch match) {
+    switch (match.tipType) {
+      case TipType.homeWin:
+        return '1 · Heimsieg';
+      case TipType.draw:
+        return 'X · Remis';
+      case TipType.awayWin:
+        return '2 · Auswärtssieg';
+      case TipType.over25:
+        return 'Ü2.5 · Tore';
+      case TipType.under25:
+        return 'U2.5 · Tore';
+      case TipType.btts:
+        return 'BTTS · Ja';
+    }
+  }
+
+  static double _estimatedMarginFor(double odds) {
+    if (odds <= 1.0) return 0.10;
+    if (odds < 1.35 || odds >= 4.50) return 0.12;
+    if (odds <= 2.40) return 0.06;
+    return 0.08;
+  }
+}
+
+class _TopTipOddsPanel extends StatelessWidget {
+  final _TopTipOddsRelevance relevance;
+
+  const _TopTipOddsPanel({required this.relevance});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _decisionColor(relevance.decision.type);
+    final valueText = relevance.score.valueEdge >= 0
+        ? '+${relevance.score.valueEdge.toStringAsFixed(1)}'
+        : relevance.score.valueEdge.toStringAsFixed(1);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(17),
+        border: Border.all(color: color.withOpacity(0.20)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.query_stats_rounded, size: 18, color: color),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Quoten-Relevanz · ${relevance.decision.label}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              _MiniScorePill(
+                text: 'Q ${relevance.score.finalScore.toStringAsFixed(0)}',
+                color: color,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _InfoPill(label: 'Markt', value: relevance.marketLabel),
+              _InfoPill(label: 'Quote', value: relevance.oddsValue.toStringAsFixed(2)),
+              _InfoPill(label: 'Risiko', value: relevance.score.riskLevel),
+              _InfoPill(label: 'Value', value: valueText),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _decisionColor(OddsMarketDecisionType type) {
+    switch (type) {
+      case OddsMarketDecisionType.premium:
+        return KickMindTheme.success;
+      case OddsMarketDecisionType.value:
+        return KickMindTheme.primary;
+      case OddsMarketDecisionType.stable:
+        return Colors.deepPurple;
+      case OddsMarketDecisionType.noBet:
+        return Colors.orange.shade800;
+    }
+  }
+}
+
+class _MiniScorePill extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _MiniScorePill({required this.text, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.13),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoPill({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.82),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withOpacity(0.9)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label ',
+            style: const TextStyle(
+              color: KickMindTheme.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              color: KickMindTheme.textDark,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CompactTipCard extends StatelessWidget {
   final FootballMatch match;
   final double finalScore;
-  final double valueEdge;
   final VoidCallback onTap;
 
   const _CompactTipCard({
     required this.match,
     required this.finalScore,
-    required this.valueEdge,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
-    final valueText = valueEdge >= 0
-        ? '+${valueEdge.toStringAsFixed(1)}%'
-        : '${valueEdge.toStringAsFixed(1)}%';
+    final oddsRelevance = _TopTipOddsRelevance.fromMatch(match);
     final compactLine =
-        '${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value $valueText';
+        '${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Quote ${oddsRelevance.oddsValue.toStringAsFixed(2)} · ${oddsRelevance.decision.label}';
 
     return InkWell(
       onTap: onTap,

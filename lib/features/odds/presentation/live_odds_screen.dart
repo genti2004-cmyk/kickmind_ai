@@ -22,13 +22,16 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
   }
 
   bool _lastLoadFailed = false;
+  LiveOddsFetchDiagnostics? _lastDiagnostics;
 
-  Future<List<LiveOdds>> _load() async {
+  Future<List<LiveOdds>> _load({bool forceRefresh = false}) async {
     try {
-      final odds = await _oddsService.fetchLiveOdds();
+      final odds = await _oddsService.fetchLiveOdds(forceRefresh: forceRefresh);
+      _lastDiagnostics = _oddsService.lastDiagnostics;
       _lastLoadFailed = false;
       return odds;
     } catch (_) {
+      _lastDiagnostics = _oddsService.lastDiagnostics;
       _lastLoadFailed = true;
       return <LiveOdds>[];
     }
@@ -36,7 +39,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
 
   Future<void> _refresh() async {
     setState(() {
-      _future = _load();
+      _future = _load(forceRefresh: true);
     });
   }
 
@@ -119,11 +122,14 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
             final allOdds = _dedupeByMatch(snapshot.data ?? <LiveOdds>[]);
             final odds = _preferCompleteTeamNames(allOdds);
             final hiddenFallbackCount = allOdds.length - odds.length;
+            final diagnostics = _lastDiagnostics;
+            final foundOddsDate = diagnostics?.foundOddsDate;
 
             if (odds.isEmpty) {
               return _LiveOddsEmptyState(
                 onRefresh: _refresh,
                 loadFailed: snapshot.hasError || _lastLoadFailed,
+                diagnostics: _lastDiagnostics,
               );
             }
 
@@ -138,6 +144,8 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
                     matchCount: odds.length,
                     bookmakerCount: odds.map((item) => item.bookmaker).toSet().length,
                     hiddenFallbackCount: hiddenFallbackCount,
+                    foundOddsDate: foundOddsDate,
+                    diagnostics: diagnostics,
                   );
                 }
 
@@ -155,11 +163,15 @@ class _LiveOddsHeader extends StatelessWidget {
   final int matchCount;
   final int bookmakerCount;
   final int hiddenFallbackCount;
+  final String? foundOddsDate;
+  final LiveOddsFetchDiagnostics? diagnostics;
 
   const _LiveOddsHeader({
     required this.matchCount,
     required this.bookmakerCount,
     required this.hiddenFallbackCount,
+    required this.foundOddsDate,
+    required this.diagnostics,
   });
 
   @override
@@ -167,6 +179,11 @@ class _LiveOddsHeader extends StatelessWidget {
     final infoText = hiddenFallbackCount > 0
         ? '$hiddenFallbackCount unvollständige Teamdatensätze ausgeblendet.'
         : 'Ein Spiel wird nur einmal angezeigt.';
+    final rangeText = diagnostics?.checkedDateRange ?? '-';
+    final checkedDaysText = diagnostics == null
+        ? '-'
+        : '${diagnostics!.checkedDatesCount}/${diagnostics!.requestedDays}';
+    final foundText = foundOddsDate ?? 'kein Datum';
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -218,7 +235,9 @@ class _LiveOddsHeader extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '$matchCount Spiele · $bookmakerCount Bookmaker',
+                      foundOddsDate == null
+                          ? '$matchCount Spiele · $bookmakerCount Bookmaker'
+                          : '$matchCount Spiele · $bookmakerCount Bookmaker · $foundOddsDate',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.82),
                         fontWeight: FontWeight.w800,
@@ -226,6 +245,28 @@ class _LiveOddsHeader extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _HeaderInfoPill(
+                icon: Icons.calendar_month_rounded,
+                label: 'Geprüft',
+                value: rangeText,
+              ),
+              _HeaderInfoPill(
+                icon: Icons.search_rounded,
+                label: 'Tage',
+                value: checkedDaysText,
+              ),
+              _HeaderInfoPill(
+                icon: Icons.check_circle_rounded,
+                label: 'Gefunden',
+                value: foundText,
               ),
             ],
           ),
@@ -244,24 +285,78 @@ class _LiveOddsHeader extends StatelessWidget {
   }
 }
 
+
+class _HeaderInfoPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _HeaderInfoPill({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.16),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$label: ',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.72),
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _LiveOddsEmptyState extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final bool loadFailed;
+  final LiveOddsFetchDiagnostics? diagnostics;
 
   const _LiveOddsEmptyState({
     required this.onRefresh,
     required this.loadFailed,
+    required this.diagnostics,
   });
 
   @override
   Widget build(BuildContext context) {
     final title = loadFailed
         ? 'Quoten konnten nicht geladen werden'
-        : 'Heute keine Quoten verfügbar';
+        : 'Keine Quoten im geprüften Zeitraum';
 
     final message = loadFailed
         ? 'Die Verbindung zur Quoten-API wurde unterbrochen oder API-Football hat die Anfrage abgelehnt. Bitte später erneut versuchen.'
-        : 'Heute sind keine Quoten verfügbar oder das API-Football-Limit wurde erreicht. Bitte später erneut versuchen.';
+        : 'API-Football liefert aktuell keine Odds-Daten im geprüften Zeitraum. Bitte später erneut versuchen oder morgen erneut prüfen.';
 
     final icon = loadFailed
         ? Icons.cloud_off_rounded
@@ -358,6 +453,10 @@ class _LiveOddsEmptyState extends StatelessWidget {
                   ),
                 ),
               ),
+              if (diagnostics != null) ...[
+                const SizedBox(height: 14),
+                _LiveOddsDiagnosticsBox(diagnostics: diagnostics!),
+              ],
               const SizedBox(height: 22),
               SizedBox(
                 width: double.infinity,
@@ -371,6 +470,115 @@ class _LiveOddsEmptyState extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+
+class _LiveOddsDiagnosticsBox extends StatelessWidget {
+  final LiveOddsFetchDiagnostics diagnostics;
+
+  const _LiveOddsDiagnosticsBox({required this.diagnostics});
+
+  @override
+  Widget build(BuildContext context) {
+    final statusText = diagnostics.httpStatusCode?.toString() ?? '-';
+    final cacheText = diagnostics.usedCache ? 'Ja' : 'Nein';
+    final refreshText = diagnostics.forceRefresh ? 'Ja' : 'Nein';
+    final keyText = diagnostics.hasApiKey ? 'Ja' : 'Nein';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFFDE68A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.bug_report_rounded,
+                size: 18,
+                color: Color(0xFFB45309),
+              ),
+              SizedBox(width: 7),
+              Text(
+                'API-Diagnose',
+                style: TextStyle(
+                  color: Color(0xFF92400E),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _DiagnosticLine(label: 'Zeit', value: diagnostics.checkedAtText),
+          _DiagnosticLine(label: 'Zeitraum', value: diagnostics.checkedDateRange),
+          _DiagnosticLine(label: 'Geprüfte Tage', value: diagnostics.checkedDatesCount.toString()),
+          _DiagnosticLine(label: 'Gefunden', value: diagnostics.foundOddsDate ?? '-'),
+          _DiagnosticLine(label: 'Status', value: statusText),
+          _DiagnosticLine(label: 'Rohdaten', value: diagnostics.rawResponseCount.toString()),
+          _DiagnosticLine(label: 'Verwendbar', value: diagnostics.parsedOddsCount.toString()),
+          _DiagnosticLine(label: 'Sichtbar', value: diagnostics.visibleOddsCount.toString()),
+          _DiagnosticLine(label: 'Cache', value: cacheText),
+          _DiagnosticLine(label: 'Refresh', value: refreshText),
+          _DiagnosticLine(label: 'API-Key', value: keyText),
+          const SizedBox(height: 8),
+          Text(
+            diagnostics.message,
+            style: const TextStyle(
+              color: Color(0xFF78350F),
+              fontWeight: FontWeight.w800,
+              height: 1.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiagnosticLine extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _DiagnosticLine({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 84,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF92400E),
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: Color(0xFF111827),
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

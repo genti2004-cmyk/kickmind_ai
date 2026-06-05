@@ -7,7 +7,7 @@ import 'package:kickmind_ai/features/odds/domain/live_odds.dart';
 class LiveOddsService {
   LiveOddsService({
     http.Client? client,
-    this.days = 7,
+    this.days = 8,
     this.bookmakerPriority = const <String>[
       'Bet365',
       'Pinnacle',
@@ -22,6 +22,8 @@ class LiveOddsService {
   final int days;
   final List<String> bookmakerPriority;
 
+  LiveOddsFetchDiagnostics lastDiagnostics = LiveOddsFetchDiagnostics.initial();
+
   static final Map<String, List<LiveOdds>> _cache = <String, List<LiveOdds>>{};
   static final Map<String, DateTime> _cacheTime = <String, DateTime>{};
   static final Map<String, _FixtureTeams> _fixtureTeamsCache = <String, _FixtureTeams>{};
@@ -29,27 +31,82 @@ class LiveOddsService {
   static const Duration _cacheDuration = Duration(minutes: 20);
 
   Future<List<LiveOdds>> fetchLiveOdds({bool forceRefresh = false}) async {
-    if (!ApiConfig.hasFootballApiKey) {
-      return <LiveOdds>[];
-    }
-
     final normalizedToday = _dateOnly(DateTime.now());
     final safeDays = days < 1 ? 1 : days;
     final cacheKey = '${_formatDate(normalizedToday)}_$safeDays';
     final now = DateTime.now();
+    final rangeEnd = normalizedToday.add(Duration(days: safeDays - 1));
+    final rangeText = '${_formatDate(normalizedToday)} bis ${_formatDate(rangeEnd)}';
+
+    if (!ApiConfig.hasFootballApiKey) {
+      lastDiagnostics = LiveOddsFetchDiagnostics(
+        checkedAt: now,
+        checkedDateRange: rangeText,
+        requestedDays: safeDays,
+        checkedDatesCount: 0,
+        foundOddsDate: null,
+        hasApiKey: false,
+        usedCache: false,
+        forceRefresh: forceRefresh,
+        httpStatusCode: null,
+        rawResponseCount: 0,
+        parsedOddsCount: 0,
+        visibleOddsCount: 0,
+        message: 'API-Key fehlt in ApiConfig.',
+      );
+      return <LiveOdds>[];
+    }
 
     if (!forceRefresh && _cache.containsKey(cacheKey)) {
       final cachedAt = _cacheTime[cacheKey];
       if (cachedAt != null && now.difference(cachedAt) < _cacheDuration) {
-        return _cache[cacheKey]!;
+        final cached = _cache[cacheKey]!;
+        lastDiagnostics = LiveOddsFetchDiagnostics(
+          checkedAt: now,
+          checkedDateRange: rangeText,
+          requestedDays: safeDays,
+          checkedDatesCount: 0,
+          foundOddsDate: null,
+          hasApiKey: true,
+          usedCache: true,
+          forceRefresh: forceRefresh,
+          httpStatusCode: 200,
+          rawResponseCount: cached.length,
+          parsedOddsCount: cached.length,
+          visibleOddsCount: cached.length,
+          message: cached.isEmpty
+              ? 'Cache war leer. Refresh erzwingt neuen API-Abruf.'
+              : 'Daten aus Cache geladen. Refresh erzwingt neuen API-Abruf.',
+        );
+        return cached;
       }
     }
 
+    var rawResponseCount = 0;
+    var parsedOddsCount = 0;
+    var checkedDatesCount = 0;
+    int? lastStatusCode;
+    String? foundOddsDate;
+    final notes = <String>[];
     final result = <LiveOdds>[];
 
     for (var offset = 0; offset < safeDays; offset++) {
       final day = normalizedToday.add(Duration(days: offset));
-      result.addAll(await _fetchOddsForDate(day));
+      checkedDatesCount++;
+      final dayResult = await _fetchOddsForDateDetailed(day);
+      rawResponseCount += dayResult.rawResponseCount;
+      parsedOddsCount += dayResult.odds.length;
+      lastStatusCode = dayResult.statusCode ?? lastStatusCode;
+
+      if (dayResult.message.trim().isNotEmpty) {
+        notes.add('${_formatDate(day)}: ${dayResult.message}');
+      }
+
+      if (dayResult.odds.isNotEmpty) {
+        foundOddsDate = _formatDate(day);
+        result.addAll(dayResult.odds);
+        break;
+      }
     }
 
     final unique = <String, LiveOdds>{};
@@ -65,12 +122,87 @@ class LiveOddsService {
         return '${a.homeTeam} ${a.awayTeam}'.compareTo('${b.homeTeam} ${b.awayTeam}');
       });
 
-    _cache[cacheKey] = sorted;
-    _cacheTime[cacheKey] = DateTime.now();
+    if (sorted.isNotEmpty) {
+      _cache[cacheKey] = sorted;
+      _cacheTime[cacheKey] = DateTime.now();
+    } else {
+      _cache.remove(cacheKey);
+      _cacheTime.remove(cacheKey);
+    }
+
+    final message = _buildDiagnosticsMessage(
+      statusCode: lastStatusCode,
+      rawResponseCount: rawResponseCount,
+      parsedOddsCount: parsedOddsCount,
+      visibleOddsCount: sorted.length,
+      foundOddsDate: foundOddsDate,
+      checkedDatesCount: checkedDatesCount,
+      notes: notes,
+    );
+
+    lastDiagnostics = LiveOddsFetchDiagnostics(
+      checkedAt: DateTime.now(),
+      checkedDateRange: rangeText,
+      requestedDays: safeDays,
+      hasApiKey: true,
+      checkedDatesCount: checkedDatesCount,
+      foundOddsDate: foundOddsDate,
+      usedCache: false,
+      forceRefresh: forceRefresh,
+      httpStatusCode: lastStatusCode,
+      rawResponseCount: rawResponseCount,
+      parsedOddsCount: parsedOddsCount,
+      visibleOddsCount: sorted.length,
+      message: message,
+    );
+
     return sorted;
   }
 
+  String _buildDiagnosticsMessage({
+    required int? statusCode,
+    required int rawResponseCount,
+    required int parsedOddsCount,
+    required int visibleOddsCount,
+    required String? foundOddsDate,
+    required int checkedDatesCount,
+    required List<String> notes,
+  }) {
+    if (statusCode == null) {
+      return notes.isEmpty
+          ? 'Keine Antwort von API-Football erhalten.'
+          : notes.take(2).join(' · ');
+    }
+
+    if (statusCode != 200) {
+      return 'API-Football antwortet mit Status $statusCode. Das kann Limit, Plan-Rechte oder temporäre Ablehnung bedeuten.';
+    }
+
+    if (rawResponseCount == 0) {
+      return 'API-Football hat Status 200 geliefert, aber im geprüften Zeitraum keine Odds-Rohdaten gefunden.';
+    }
+
+    if (parsedOddsCount == 0) {
+      return 'API-Football hat $rawResponseCount Roh-Datensätze geliefert, aber keine vollständigen 1/X/2-Quoten für die App.';
+    }
+
+    if (visibleOddsCount == 0) {
+      return 'Quoten wurden geladen, aber nach Bereinigung/Dedupe ist keine sichtbare Karte übrig geblieben.';
+    }
+
+    if (foundOddsDate != null) {
+      return 'API-Abruf erfolgreich: $visibleOddsCount sichtbare Spiele gefunden für $foundOddsDate nach $checkedDatesCount geprüften Tag(en).';
+    }
+
+    return 'API-Abruf erfolgreich: $visibleOddsCount sichtbare Spiele.';
+  }
+
   Future<List<LiveOdds>> _fetchOddsForDate(DateTime date) async {
+    final result = await _fetchOddsForDateDetailed(date);
+    return result.odds;
+  }
+
+  Future<_OddsDateFetchResult> _fetchOddsForDateDetailed(DateTime date) async {
     final uri = Uri.parse(
       '${ApiConfig.footballBaseUrl}/odds?date=${_formatDate(date)}',
     );
@@ -83,13 +215,34 @@ class LiveOddsService {
         },
       ).timeout(const Duration(seconds: 14));
 
-      if (response.statusCode != 200) return <LiveOdds>[];
+      if (response.statusCode != 200) {
+        return _OddsDateFetchResult(
+          odds: const <LiveOdds>[],
+          statusCode: response.statusCode,
+          rawResponseCount: 0,
+          message: 'HTTP ${response.statusCode}',
+        );
+      }
 
       final decoded = jsonDecode(response.body);
-      if (decoded is! Map<String, dynamic>) return <LiveOdds>[];
+      if (decoded is! Map<String, dynamic>) {
+        return const _OddsDateFetchResult(
+          odds: <LiveOdds>[],
+          statusCode: 200,
+          rawResponseCount: 0,
+          message: 'Antwort ist kein JSON-Objekt',
+        );
+      }
 
       final rawResponse = decoded['response'];
-      if (rawResponse is! List || rawResponse.isEmpty) return <LiveOdds>[];
+      if (rawResponse is! List || rawResponse.isEmpty) {
+        return const _OddsDateFetchResult(
+          odds: <LiveOdds>[],
+          statusCode: 200,
+          rawResponseCount: 0,
+          message: 'response leer',
+        );
+      }
 
       final list = <LiveOdds>[];
       for (final item in rawResponse) {
@@ -97,9 +250,24 @@ class LiveOddsService {
         final parsed = await _parseFixtureOdds(item);
         if (parsed != null) list.add(parsed);
       }
-      return list;
-    } catch (_) {
-      return <LiveOdds>[];
+
+      final message = list.isEmpty
+          ? '${rawResponse.length} Roh-Datensätze, 0 vollständige 1/X/2-Quoten'
+          : '${rawResponse.length} Roh-Datensätze, ${list.length} verwendbar';
+
+      return _OddsDateFetchResult(
+        odds: list,
+        statusCode: 200,
+        rawResponseCount: rawResponse.length,
+        message: message,
+      );
+    } catch (error) {
+      return _OddsDateFetchResult(
+        odds: const <LiveOdds>[],
+        statusCode: null,
+        rawResponseCount: 0,
+        message: 'Fehler: ${error.runtimeType}',
+      );
     }
   }
 
@@ -323,6 +491,77 @@ class LiveOddsService {
         '${value.month.toString().padLeft(2, '0')}-'
         '${value.day.toString().padLeft(2, '0')}';
   }
+}
+
+class LiveOddsFetchDiagnostics {
+  const LiveOddsFetchDiagnostics({
+    required this.checkedAt,
+    required this.checkedDateRange,
+    required this.requestedDays,
+    required this.checkedDatesCount,
+    required this.foundOddsDate,
+    required this.hasApiKey,
+    required this.usedCache,
+    required this.forceRefresh,
+    required this.httpStatusCode,
+    required this.rawResponseCount,
+    required this.parsedOddsCount,
+    required this.visibleOddsCount,
+    required this.message,
+  });
+
+  factory LiveOddsFetchDiagnostics.initial() {
+    return LiveOddsFetchDiagnostics(
+      checkedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      checkedDateRange: '-',
+      requestedDays: 0,
+      checkedDatesCount: 0,
+      foundOddsDate: null,
+      hasApiKey: false,
+      usedCache: false,
+      forceRefresh: false,
+      httpStatusCode: null,
+      rawResponseCount: 0,
+      parsedOddsCount: 0,
+      visibleOddsCount: 0,
+      message: 'Noch kein API-Abruf durchgeführt.',
+    );
+  }
+
+  final DateTime checkedAt;
+  final String checkedDateRange;
+  final int requestedDays;
+  final int checkedDatesCount;
+  final String? foundOddsDate;
+  final bool hasApiKey;
+  final bool usedCache;
+  final bool forceRefresh;
+  final int? httpStatusCode;
+  final int rawResponseCount;
+  final int parsedOddsCount;
+  final int visibleOddsCount;
+  final String message;
+
+  String get checkedAtText {
+    final hour = checkedAt.hour.toString().padLeft(2, '0');
+    final minute = checkedAt.minute.toString().padLeft(2, '0');
+    final second = checkedAt.second.toString().padLeft(2, '0');
+    return '$hour:$minute:$second';
+  }
+}
+
+class _OddsDateFetchResult {
+  const _OddsDateFetchResult({
+    required this.odds,
+    required this.statusCode,
+    required this.rawResponseCount,
+    required this.message,
+  });
+
+  final List<LiveOdds> odds;
+  final int? statusCode;
+  final int rawResponseCount;
+  final String message;
 }
 
 class _FixtureTeams {
