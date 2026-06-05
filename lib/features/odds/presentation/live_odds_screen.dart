@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:kickmind_ai/core/scoring/odds_score_service.dart';
 import 'package:kickmind_ai/features/matches/data/repositories/match_repository_impl.dart';
 import 'package:kickmind_ai/features/matches/domain/match_date_range.dart';
+import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/odds/data/live_odds_service.dart';
 import 'package:kickmind_ai/features/odds/domain/live_odds.dart';
 
@@ -52,10 +53,10 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
       ]);
 
       return _FixtureSourceSummary(
-        today: results[0].length,
-        tomorrow: results[1].length,
-        next3Days: results[2].length,
-        next7Days: results[3].length,
+        todayMatches: results[0],
+        tomorrowMatches: results[1],
+        next3DaysMatches: results[2],
+        next7DaysMatches: results[3],
       );
     } catch (_) {
       return const _FixtureSourceSummary.empty();
@@ -484,6 +485,8 @@ class _LiveOddsEmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               _FixtureSourceComparisonCard(future: fixtureSourceFuture),
+              const SizedBox(height: 14),
+              _AnalysisFixtureFallbackList(future: fixtureSourceFuture),
               if (diagnostics != null) ...[
                 const SizedBox(height: 14),
                 _LiveOddsDiagnosticsBox(diagnostics: diagnostics!),
@@ -508,25 +511,45 @@ class _LiveOddsEmptyState extends StatelessWidget {
 
 
 class _FixtureSourceSummary {
-  final int today;
-  final int tomorrow;
-  final int next3Days;
-  final int next7Days;
+  final List<FootballMatch> todayMatches;
+  final List<FootballMatch> tomorrowMatches;
+  final List<FootballMatch> next3DaysMatches;
+  final List<FootballMatch> next7DaysMatches;
 
   const _FixtureSourceSummary({
-    required this.today,
-    required this.tomorrow,
-    required this.next3Days,
-    required this.next7Days,
+    required this.todayMatches,
+    required this.tomorrowMatches,
+    required this.next3DaysMatches,
+    required this.next7DaysMatches,
   });
 
   const _FixtureSourceSummary.empty()
-      : today = 0,
-        tomorrow = 0,
-        next3Days = 0,
-        next7Days = 0;
+      : todayMatches = const <FootballMatch>[],
+        tomorrowMatches = const <FootballMatch>[],
+        next3DaysMatches = const <FootballMatch>[],
+        next7DaysMatches = const <FootballMatch>[];
+
+  int get today => todayMatches.length;
+  int get tomorrow => tomorrowMatches.length;
+  int get next3Days => next3DaysMatches.length;
+  int get next7Days => next7DaysMatches.length;
 
   bool get hasMatches => today > 0 || tomorrow > 0 || next3Days > 0 || next7Days > 0;
+
+  List<FootballMatch> get bestFallbackMatches {
+    if (next7DaysMatches.isNotEmpty) return next7DaysMatches;
+    if (next3DaysMatches.isNotEmpty) return next3DaysMatches;
+    if (tomorrowMatches.isNotEmpty) return tomorrowMatches;
+    return todayMatches;
+  }
+
+  String get bestFallbackLabel {
+    if (next7DaysMatches.isNotEmpty) return 'Woche';
+    if (next3DaysMatches.isNotEmpty) return '3 Tage';
+    if (tomorrowMatches.isNotEmpty) return 'Morgen';
+    if (todayMatches.isNotEmpty) return 'Heute';
+    return '-';
+  }
 }
 
 class _FixtureSourceComparisonCard extends StatelessWidget {
@@ -600,6 +623,246 @@ class _FixtureSourceComparisonCard extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _AnalysisFixtureFallbackList extends StatelessWidget {
+  final Future<_FixtureSourceSummary> future;
+
+  const _AnalysisFixtureFallbackList({required this.future});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_FixtureSourceSummary>(
+      future: future,
+      builder: (context, snapshot) {
+        final summary = snapshot.data ?? const _FixtureSourceSummary.empty();
+        final matches = summary.bestFallbackMatches.take(8).toList();
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFE3ECF7)),
+            ),
+            child: const Text(
+              'Lade Analyse-Spiele ...',
+              style: TextStyle(
+                color: Color(0xFF374151),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          );
+        }
+
+        if (matches.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFE3ECF7)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 14,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEAF3FF),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.sports_soccer_rounded,
+                      size: 18,
+                      color: Color(0xFF176CC7),
+                    ),
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Analyse-Spiele ohne Live-Odds',
+                          style: TextStyle(
+                            color: Color(0xFF111827),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${summary.bestFallbackLabel} · ${summary.bestFallbackMatches.length} Spiele gefunden',
+                          style: const TextStyle(
+                            color: Color(0xFF6B7280),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Diese Liste nutzt die vorhandene Match-/Analyse-Quelle. Es werden keine künstlichen Live-Quoten erzeugt.',
+                style: TextStyle(
+                  color: Color(0xFF374151),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ...matches.map((match) => _AnalysisFixtureCard(match)),
+              if (summary.bestFallbackMatches.length > matches.length) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '+${summary.bestFallbackMatches.length - matches.length} weitere Spiele in der Analyse-Quelle.',
+                  style: const TextStyle(
+                    color: Color(0xFF176CC7),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AnalysisFixtureCard extends StatelessWidget {
+  final FootballMatch match;
+
+  const _AnalysisFixtureCard(this.match);
+
+  @override
+  Widget build(BuildContext context) {
+    final kickoffText = _formatKickoff(match.kickoff);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            match.league,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${match.homeTeam} vs ${match.awayTeam}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF111827),
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+              height: 1.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _SmallInfoChip(
+                icon: Icons.schedule_rounded,
+                text: kickoffText,
+              ),
+              _SmallInfoChip(
+                icon: Icons.auto_graph_rounded,
+                text: 'KI ${match.aiScore}',
+              ),
+              _SmallInfoChip(
+                icon: Icons.shield_rounded,
+                text: 'Risiko ${match.riskLevel}',
+              ),
+              const _SmallInfoChip(
+                icon: Icons.money_off_rounded,
+                text: 'keine Live-Odds',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatKickoff(DateTime value) {
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '$day.$month. $hour:$minute';
+  }
+}
+
+class _SmallInfoChip extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _SmallInfoChip({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: const Color(0xFF176CC7)),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Color(0xFF374151),
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
