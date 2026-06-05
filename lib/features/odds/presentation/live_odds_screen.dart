@@ -120,7 +120,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
 
             return ListView.separated(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 150),
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 118),
               itemCount: odds.length + 1,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
@@ -244,7 +244,7 @@ class _LiveOddsEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(24, 42, 24, 150),
+      padding: const EdgeInsets.fromLTRB(24, 42, 24, 118),
       children: [
         const Text(
           'Live Quoten',
@@ -335,7 +335,6 @@ class _LiveOddsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasFallbackNames = _hasFallbackTeamNames(odds);
-    final title = _matchTitle(odds);
     final subtitle = hasFallbackNames
         ? 'Quoten vorhanden · Fixture ${odds.matchId}'
         : 'Aktualisiert ${_formatDateTime(odds.updatedAt)}';
@@ -385,17 +384,12 @@ class _LiveOddsCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF111827),
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                      ),
+                    _TeamTitle(
+                      homeTeam: odds.homeTeam,
+                      awayTeam: odds.awayTeam,
+                      isFallback: hasFallbackNames,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Text(
                       subtitle,
                       maxLines: 1,
@@ -455,19 +449,93 @@ class _LiveOddsCard extends StatelessWidget {
         home == away;
   }
 
-  String _matchTitle(LiveOdds value) {
-    if (_hasFallbackTeamNames(value)) {
-      return 'Teamdaten werden geladen';
-    }
-    return '${value.homeTeam} vs ${value.awayTeam}';
-  }
-
   String _formatDateTime(DateTime value) {
     final day = value.day.toString().padLeft(2, '0');
     final month = value.month.toString().padLeft(2, '0');
     final hour = value.hour.toString().padLeft(2, '0');
     final minute = value.minute.toString().padLeft(2, '0');
     return '$day.$month. $hour:$minute';
+  }
+}
+
+
+class _TeamTitle extends StatelessWidget {
+  final String homeTeam;
+  final String awayTeam;
+  final bool isFallback;
+
+  const _TeamTitle({
+    required this.homeTeam,
+    required this.awayTeam,
+    required this.isFallback,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isFallback) {
+      return const Text(
+        'Teamdaten werden geladen',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: Color(0xFF111827),
+          fontSize: 17,
+          fontWeight: FontWeight.w900,
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          homeTeam,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Color(0xFF111827),
+            fontSize: 17,
+            fontWeight: FontWeight.w900,
+            height: 1.05,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAF3FF),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: const Text(
+                'vs',
+                style: TextStyle(
+                  color: Color(0xFF176CC7),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                awayTeam,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  height: 1.05,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }
 
