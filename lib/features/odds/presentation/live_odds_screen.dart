@@ -382,116 +382,91 @@ class _LiveOddsEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final title = loadFailed
         ? 'Quoten konnten nicht geladen werden'
-        : 'Keine Quoten im geprüften Zeitraum';
+        : 'Keine echten Live-Odds verfügbar';
 
     final message = loadFailed
-        ? 'Die Verbindung zur Quoten-API wurde unterbrochen oder API-Football hat die Anfrage abgelehnt. Bitte später erneut versuchen.'
-        : 'API-Football liefert aktuell keine Odds-Daten im geprüften Zeitraum. Bitte später erneut versuchen oder morgen erneut prüfen.';
+        ? 'Die Quoten-API konnte nicht gelesen werden. Bitte später erneut prüfen.'
+        : 'API-Football liefert aktuell keine Odds-Rohdaten. Analyse-Spiele bleiben sichtbar, aber ohne Fake-Quoten.';
 
-    final icon = loadFailed
-        ? Icons.cloud_off_rounded
-        : Icons.info_outline_rounded;
+    final icon = loadFailed ? Icons.cloud_off_rounded : Icons.radar_rounded;
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(24, 42, 24, 118),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 118),
       children: [
-        const Text(
-          'Live Quoten',
-          style: TextStyle(
-            fontSize: 34,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'Value, Risiko und Final Score werden automatisch berechnet, sobald Live-Odds verfügbar sind.',
-          style: TextStyle(
-            color: Colors.grey.shade700,
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            height: 1.35,
-          ),
-        ),
-        const SizedBox(height: 30),
         Container(
-          padding: const EdgeInsets.all(26),
+          padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(30),
+            borderRadius: BorderRadius.circular(26),
             border: Border.all(color: const Color(0xFFE3ECF7)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.07),
-                blurRadius: 24,
-                offset: const Offset(0, 12),
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
               ),
             ],
           ),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 78,
-                height: 78,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEAF3FF),
-                  borderRadius: BorderRadius.circular(26),
-                ),
-                child: Icon(
-                  icon,
-                  size: 40,
-                  color: const Color(0xFF176CC7),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF111827),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.grey.shade700,
-                  height: 1.38,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 18),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF6F8FC),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0xFFE3ECF7)),
-                ),
-                child: const Text(
-                  'Hinweis: Die App bleibt stabil. Es fehlen nur aktuelle Odds-Daten vom Anbieter.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Color(0xFF374151),
-                    fontWeight: FontWeight.w800,
-                    height: 1.3,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEAF3FF),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 30,
+                      color: const Color(0xFF176CC7),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF111827),
+                            height: 1.15,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          message,
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontSize: 13,
+                            height: 1.32,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 14),
+              _LiveOddsEmptySummary(future: fixtureSourceFuture),
+              const SizedBox(height: 12),
               _FixtureSourceComparisonCard(future: fixtureSourceFuture),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               _AnalysisFixtureFallbackList(future: fixtureSourceFuture),
               if (diagnostics != null) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
                 _LiveOddsDiagnosticsBox(diagnostics: diagnostics!),
               ],
-              const SizedBox(height: 22),
+              const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -509,6 +484,138 @@ class _LiveOddsEmptyState extends StatelessWidget {
 }
 
 
+class _LiveOddsEmptySummary extends StatelessWidget {
+  final Future<_FixtureSourceSummary> future;
+
+  const _LiveOddsEmptySummary({required this.future});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_FixtureSourceSummary>(
+      future: future,
+      builder: (context, snapshot) {
+        final summary = snapshot.data ?? const _FixtureSourceSummary.empty();
+        final fallbackCount = summary.bestFallbackMatches.length;
+        final label = summary.bestFallbackLabel;
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF0B4EA2), Color(0xFF1685F8)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF0B4EA2).withOpacity(0.16),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: const Icon(
+                      Icons.sports_soccer_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Analyse-Spiele verfügbar',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          snapshot.connectionState == ConnectionState.waiting
+                              ? 'Spielequelle wird geprüft ...'
+                              : fallbackCount > 0
+                              ? '$label · $fallbackCount Spiele gefunden'
+                              : 'Keine Analyse-Spiele gefunden',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.82),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: const [
+                  _WhiteStatusPill(icon: Icons.verified_rounded, text: 'echte Daten'),
+                  _WhiteStatusPill(icon: Icons.money_off_rounded, text: 'keine Live-Odds'),
+                  _WhiteStatusPill(icon: Icons.block_rounded, text: 'keine Fake-Quoten'),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WhiteStatusPill extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _WhiteStatusPill({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withOpacity(0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 14),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _FixtureSourceSummary {
   final List<FootballMatch> todayMatches;
@@ -881,55 +988,64 @@ class _LiveOddsDiagnosticsBox extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFFFFFBEB),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: const Color(0xFFFDE68A)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.bug_report_rounded,
-                size: 18,
-                color: Color(0xFFB45309),
-              ),
-              SizedBox(width: 7),
-              Text(
-                'API-Diagnose',
-                style: TextStyle(
-                  color: Color(0xFF92400E),
-                  fontWeight: FontWeight.w900,
-                  fontSize: 13,
-                ),
-              ),
-            ],
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: false,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+          leading: const Icon(
+            Icons.bug_report_rounded,
+            size: 18,
+            color: Color(0xFFB45309),
           ),
-          const SizedBox(height: 10),
-          _DiagnosticLine(label: 'Zeit', value: diagnostics.checkedAtText),
-          _DiagnosticLine(label: 'Zeitraum', value: diagnostics.checkedDateRange),
-          _DiagnosticLine(label: 'Geprüfte Tage', value: diagnostics.checkedDatesCount.toString()),
-          _DiagnosticLine(label: 'Gefunden', value: diagnostics.foundOddsDate ?? '-'),
-          _DiagnosticLine(label: 'Status', value: statusText),
-          _DiagnosticLine(label: 'Rohdaten', value: diagnostics.rawResponseCount.toString()),
-          _DiagnosticLine(label: 'Verwendbar', value: diagnostics.parsedOddsCount.toString()),
-          _DiagnosticLine(label: 'Sichtbar', value: diagnostics.visibleOddsCount.toString()),
-          _DiagnosticLine(label: 'Cache', value: cacheText),
-          _DiagnosticLine(label: 'Refresh', value: refreshText),
-          _DiagnosticLine(label: 'API-Key', value: keyText),
-          const SizedBox(height: 8),
-          Text(
-            diagnostics.message,
-            style: const TextStyle(
-              color: Color(0xFF78350F),
-              fontWeight: FontWeight.w800,
-              height: 1.3,
+          title: const Text(
+            'API-Diagnose',
+            style: TextStyle(
+              color: Color(0xFF92400E),
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
             ),
           ),
-        ],
+          subtitle: Text(
+            'Status $statusText · ${diagnostics.checkedDatesCount} Tage · Rohdaten ${diagnostics.rawResponseCount}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF78350F),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          children: [
+            _DiagnosticLine(label: 'Zeit', value: diagnostics.checkedAtText),
+            _DiagnosticLine(label: 'Zeitraum', value: diagnostics.checkedDateRange),
+            _DiagnosticLine(label: 'Geprüfte Tage', value: diagnostics.checkedDatesCount.toString()),
+            _DiagnosticLine(label: 'Gefunden', value: diagnostics.foundOddsDate ?? '-'),
+            _DiagnosticLine(label: 'Status', value: statusText),
+            _DiagnosticLine(label: 'Rohdaten', value: diagnostics.rawResponseCount.toString()),
+            _DiagnosticLine(label: 'Verwendbar', value: diagnostics.parsedOddsCount.toString()),
+            _DiagnosticLine(label: 'Sichtbar', value: diagnostics.visibleOddsCount.toString()),
+            _DiagnosticLine(label: 'Cache', value: cacheText),
+            _DiagnosticLine(label: 'Refresh', value: refreshText),
+            _DiagnosticLine(label: 'API-Key', value: keyText),
+            const SizedBox(height: 8),
+            Text(
+              diagnostics.message,
+              style: const TextStyle(
+                color: Color(0xFF78350F),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                height: 1.3,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
