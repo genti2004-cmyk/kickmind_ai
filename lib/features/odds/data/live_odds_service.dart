@@ -197,11 +197,6 @@ class LiveOddsService {
     return 'API-Abruf erfolgreich: $visibleOddsCount sichtbare Spiele.';
   }
 
-  Future<List<LiveOdds>> _fetchOddsForDate(DateTime date) async {
-    final result = await _fetchOddsForDateDetailed(date);
-    return result.odds;
-  }
-
   Future<_OddsDateFetchResult> _fetchOddsForDateDetailed(DateTime date) async {
     final uri = Uri.parse(
       '${ApiConfig.footballBaseUrl}/odds?date=${_formatDate(date)}',
