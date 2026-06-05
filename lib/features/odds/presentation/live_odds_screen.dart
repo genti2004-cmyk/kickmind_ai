@@ -36,15 +36,50 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
 
   List<LiveOdds> _dedupeByMatch(List<LiveOdds> source) {
     final unique = <String, LiveOdds>{};
+
     for (final item in source) {
       final key = item.matchId.trim().isEmpty
           ? '${item.homeTeam}_${item.awayTeam}_${item.updatedAt.toIso8601String()}'
           : item.matchId.trim();
-      unique[key] = item;
+
+      final current = unique[key];
+      if (current == null || _marketCount(item) > _marketCount(current)) {
+        unique[key] = item;
+      }
     }
+
     final values = unique.values.toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
     return values;
+  }
+
+  int _marketCount(LiveOdds item) {
+    var count = 3; // 1 / X / 2
+    if (item.over25 != null) count++;
+    if (item.under25 != null) count++;
+    if (item.bttsYes != null) count++;
+    return count;
+  }
+
+  List<LiveOdds> _preferCompleteTeamNames(List<LiveOdds> source) {
+    final complete = source.where((item) => !_hasFallbackTeamNames(item)).toList();
+    if (complete.isEmpty) {
+      return source;
+    }
+    return complete;
+  }
+
+  bool _hasFallbackTeamNames(LiveOdds value) {
+    final home = value.homeTeam.trim().toLowerCase();
+    final away = value.awayTeam.trim().toLowerCase();
+
+    return home.isEmpty ||
+        away.isEmpty ||
+        home.startsWith('heimteam') ||
+        away.startsWith('auswärtsteam') ||
+        away.startsWith('auswaertsteam') ||
+        home == away;
   }
 
   @override
@@ -75,7 +110,9 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
               return const Center(child: CircularProgressIndicator());
             }
 
-            final odds = _dedupeByMatch(snapshot.data ?? <LiveOdds>[]);
+            final allOdds = _dedupeByMatch(snapshot.data ?? <LiveOdds>[]);
+            final odds = _preferCompleteTeamNames(allOdds);
+            final hiddenFallbackCount = allOdds.length - odds.length;
 
             if (odds.isEmpty) {
               return _LiveOddsEmptyState(onRefresh: _refresh);
@@ -91,6 +128,7 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
                   return _LiveOddsHeader(
                     matchCount: odds.length,
                     bookmakerCount: odds.map((item) => item.bookmaker).toSet().length,
+                    hiddenFallbackCount: hiddenFallbackCount,
                   );
                 }
 
@@ -107,14 +145,20 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
 class _LiveOddsHeader extends StatelessWidget {
   final int matchCount;
   final int bookmakerCount;
+  final int hiddenFallbackCount;
 
   const _LiveOddsHeader({
     required this.matchCount,
     required this.bookmakerCount,
+    required this.hiddenFallbackCount,
   });
 
   @override
   Widget build(BuildContext context) {
+    final infoText = hiddenFallbackCount > 0
+        ? '$hiddenFallbackCount unvollständige Teamdatensätze ausgeblendet.'
+        : 'Ein Spiel wird nur einmal angezeigt.';
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -144,7 +188,11 @@ class _LiveOddsHeader extends StatelessWidget {
                   color: Colors.white.withOpacity(0.18),
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Icon(Icons.casino_rounded, color: Colors.white, size: 28),
+                child: const Icon(
+                  Icons.casino_rounded,
+                  color: Colors.white,
+                  size: 28,
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -174,7 +222,7 @@ class _LiveOddsHeader extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(
-            'Ein Spiel wird nur einmal angezeigt. Die wichtigsten Märkte stehen kompakt in derselben Karte.',
+            '$infoText Die wichtigsten Märkte stehen kompakt in derselben Karte.',
             style: TextStyle(
               color: Colors.white.withOpacity(0.88),
               fontWeight: FontWeight.w700,
@@ -239,7 +287,11 @@ class _LiveOddsEmptyState extends StatelessWidget {
                   color: Colors.indigo.withOpacity(0.10),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.casino_rounded, size: 40, color: Colors.indigo),
+                child: const Icon(
+                  Icons.casino_rounded,
+                  size: 40,
+                  color: Colors.indigo,
+                ),
               ),
               const SizedBox(height: 20),
               const Text(
@@ -282,17 +334,20 @@ class _LiveOddsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasFallbackNames = _hasFallbackTeamNames(odds);
     final title = _matchTitle(odds);
-    final subtitle = _hasFallbackTeamNames(odds)
-        ? 'Teamdaten nicht vollständig geladen · Fixture ${odds.matchId}'
+    final subtitle = hasFallbackNames
+        ? 'Quoten vorhanden · Fixture ${odds.matchId}'
         : 'Aktualisiert ${_formatDateTime(odds.updatedAt)}';
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: hasFallbackNames ? const Color(0xFFFFFBEB) : Colors.white,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE3ECF7)),
+        border: Border.all(
+          color: hasFallbackNames ? const Color(0xFFFDE68A) : const Color(0xFFE3ECF7),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.06),
@@ -311,10 +366,19 @@ class _LiveOddsCard extends StatelessWidget {
                 width: 46,
                 height: 46,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEAF3FF),
+                  color: hasFallbackNames
+                      ? const Color(0xFFFEF3C7)
+                      : const Color(0xFFEAF3FF),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Icon(Icons.sports_soccer_rounded, color: Color(0xFF176CC7)),
+                child: Icon(
+                  hasFallbackNames
+                      ? Icons.hourglass_empty_rounded
+                      : Icons.sports_soccer_rounded,
+                  color: hasFallbackNames
+                      ? const Color(0xFFB45309)
+                      : const Color(0xFF176CC7),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -380,12 +444,20 @@ class _LiveOddsCard extends StatelessWidget {
   }
 
   bool _hasFallbackTeamNames(LiveOdds value) {
-    return value.homeTeam.startsWith('Heimteam') || value.awayTeam.startsWith('Auswärtsteam');
+    final home = value.homeTeam.trim().toLowerCase();
+    final away = value.awayTeam.trim().toLowerCase();
+
+    return home.isEmpty ||
+        away.isEmpty ||
+        home.startsWith('heimteam') ||
+        away.startsWith('auswärtsteam') ||
+        away.startsWith('auswaertsteam') ||
+        home == away;
   }
 
   String _matchTitle(LiveOdds value) {
     if (_hasFallbackTeamNames(value)) {
-      return 'Spiel ${value.matchId}';
+      return 'Teamdaten werden geladen';
     }
     return '${value.homeTeam} vs ${value.awayTeam}';
   }
