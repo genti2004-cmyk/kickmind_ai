@@ -147,15 +147,15 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
           return RefreshIndicator(
             onRefresh: _reload,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 118),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 106),
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
                 _SavedSummary(stats: stats),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
                 const _SectionTitle(
                     icon: Icons.bookmark_rounded,
                     title: 'Gespeicherte Tipps',
-                    subtitle: 'Gespeicherte Auswahl mit zentraler Bewertung.'
+                    subtitle: 'Sortiert nach Final Score und Startzeit.'
                 ),
                 const SizedBox(height: 12),
                 ...tips.map((match) {
@@ -187,14 +187,14 @@ class _SavedSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF0B2540), Color(0xFF1565C0)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
             color: KickMindTheme.primary.withOpacity(0.20),
@@ -215,7 +215,7 @@ class _SavedSummary extends StatelessWidget {
                   'Gespeicherte Auswahl',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -227,7 +227,7 @@ class _SavedSummary extends StatelessWidget {
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  'Ø Final ${stats.averageFinal.toStringAsFixed(1)}',
+                  'Ø ${stats.averageFinal.toStringAsFixed(1)}',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w900,
@@ -296,7 +296,7 @@ class _SummaryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.12),
         borderRadius: BorderRadius.circular(18),
@@ -322,7 +322,7 @@ class _SummaryTile extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 20,
+              fontSize: 18,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -358,12 +358,12 @@ class _SavedTipCard extends StatelessWidget {
       key: ValueKey(match.id),
       direction: DismissDirection.endToStart,
       background: Container(
-        margin: const EdgeInsets.only(bottom: 12),
+        margin: const EdgeInsets.only(bottom: 10),
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 22),
         decoration: BoxDecoration(
           color: KickMindTheme.danger,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(22),
         ),
         child: const Icon(Icons.delete_rounded, color: Colors.white),
       ),
@@ -372,14 +372,14 @@ class _SavedTipCard extends StatelessWidget {
         return false;
       },
       child: InkWell(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(22),
         onTap: onTap,
         child: Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(22),
             border: Border.all(color: KickMindTheme.primary.withOpacity(0.12)),
             boxShadow: [
               BoxShadow(
@@ -427,22 +427,22 @@ class _SavedTipCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 match.teamsLabel,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: KickMindTheme.textDark,
-                  fontSize: 22,
+                  fontSize: 20,
                   fontWeight: FontWeight.w900,
                   height: 1.10,
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 7,
+                runSpacing: 7,
                 children: [
                   _MetricChip(
                     text: decision.label,
@@ -482,7 +482,7 @@ class _SavedTipCard extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   const Text(
@@ -512,15 +512,15 @@ class _SavedTipCard extends StatelessWidget {
                   valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Text(
                 _reasonText(match, score, value, decision),
-                maxLines: 2,
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: Colors.grey.shade800,
                   height: 1.35,
-                  fontSize: 14,
+                  fontSize: 13,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -567,7 +567,7 @@ class _MetricChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(999),
@@ -576,6 +576,7 @@ class _MetricChip extends StatelessWidget {
         text,
         style: TextStyle(
           color: color,
+          fontSize: 12,
           fontWeight: FontWeight.w900,
         ),
       ),
@@ -600,8 +601,8 @@ class _SectionTitle extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 46,
-          height: 46,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(
             color: KickMindTheme.primary.withOpacity(0.10),
             borderRadius: BorderRadius.circular(16),
@@ -617,7 +618,7 @@ class _SectionTitle extends StatelessWidget {
                 title,
                 style: const TextStyle(
                   color: KickMindTheme.textDark,
-                  fontSize: 22,
+                  fontSize: 20,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -626,7 +627,7 @@ class _SectionTitle extends StatelessWidget {
                 subtitle,
                 style: const TextStyle(
                   color: KickMindTheme.textMuted,
-                  fontSize: 14,
+                  fontSize: 13,
                   fontWeight: FontWeight.w800,
                 ),
               ),
