@@ -464,8 +464,8 @@ class _TopTipCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(22),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 15),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 13),
         decoration: BoxDecoration(
           color: KickMindTheme.surface,
           borderRadius: BorderRadius.circular(22),
@@ -514,19 +514,19 @@ class _TopTipCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Text(
               match.teamsLabel,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: KickMindTheme.textDark,
-                fontSize: 18.5,
+                fontSize: 17.5,
                 height: 1.12,
                 fontWeight: FontWeight.w900,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -543,22 +543,23 @@ class _TopTipCard extends StatelessWidget {
                   ),
               ],
             ),
-            const SizedBox(height: 13),
+            const SizedBox(height: 10),
             _ScoreBar(
               label: 'Confidence',
               value: confidence,
               color: scoreColor,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _TopTipOddsPanel(relevance: oddsRelevance),
-            const SizedBox(height: 12),
+            const SizedBox(height: 9),
             Text(
               cardReason,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Colors.grey.shade800,
-                height: 1.34,
+                height: 1.25,
+                fontSize: 12.5,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -574,18 +575,18 @@ class _TopTipCard extends StatelessWidget {
         : '${valueEdge.toStringAsFixed(1)}%';
 
     if (finalScore >= 74 && valueEdge >= 8 && match.riskLevel != 'Hoch') {
-      return 'Premium: ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value $valueText · Risiko ${match.riskLevel}.';
+      return 'Premium · ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value $valueText';
     }
 
     if (valueEdge >= 8 && match.riskLevel != 'Hoch') {
-      return 'Value: ${match.tipLabel} · Quote ${match.odds.toStringAsFixed(2)} · Edge $valueText · Risiko ${match.riskLevel}.';
+      return 'Value · ${match.tipLabel} · Quote ${match.odds.toStringAsFixed(2)} · Edge $valueText';
     }
 
     if (finalScore >= 55 && match.riskLevel != 'Hoch') {
-      return 'Watch: solide Datenlage · Final ${finalScore.toStringAsFixed(1)} · Risiko ${match.riskLevel}.';
+      return 'Watch · solide Datenlage · Final ${finalScore.toStringAsFixed(1)}';
     }
 
-    return 'No Bet: Score, Value oder Risiko reichen aktuell nicht für eine Empfehlung.';
+    return 'No Bet · aktuell kein klares Value-Signal';
   }
 }
 
@@ -683,22 +684,22 @@ class _TopTipOddsPanel extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(17),
-        border: Border.all(color: color.withOpacity(0.20)),
+        color: color.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.18)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.query_stats_rounded, size: 18, color: color),
+              Icon(Icons.query_stats_rounded, size: 17, color: color),
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
-                  'Quoten-Relevanz · ${relevance.decision.label}',
+                  relevance.decision.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -714,16 +715,16 @@ class _TopTipOddsPanel extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _InfoPill(label: 'Markt', value: relevance.marketLabel),
-              _InfoPill(label: 'Quote', value: relevance.oddsValue.toStringAsFixed(2)),
-              _InfoPill(label: 'Risiko', value: relevance.score.riskLevel),
-              _InfoPill(label: 'Value', value: valueText),
-            ],
+          const SizedBox(height: 7),
+          Text(
+            '${relevance.marketLabel} · Quote ${relevance.oddsValue.toStringAsFixed(2)} · Risiko ${relevance.score.riskLevel} · Value $valueText',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: KickMindTheme.textMuted,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),
@@ -826,14 +827,14 @@ class _CompactTipCard extends StatelessWidget {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
     final oddsRelevance = _TopTipOddsRelevance.fromMatch(match);
     final compactLine =
-        '${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Quote ${oddsRelevance.oddsValue.toStringAsFixed(2)} · ${oddsRelevance.decision.label}';
+        '${match.tipLabel} · Q ${oddsRelevance.score.finalScore.toStringAsFixed(0)} · Quote ${oddsRelevance.oddsValue.toStringAsFixed(2)} · ${oddsRelevance.decision.label}';
 
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(18),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
+        margin: const EdgeInsets.only(bottom: 9),
+        padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
         decoration: BoxDecoration(
           color: KickMindTheme.surface,
           borderRadius: BorderRadius.circular(18),
