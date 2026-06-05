@@ -20,10 +20,15 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
     _future = _load();
   }
 
+  bool _lastLoadFailed = false;
+
   Future<List<LiveOdds>> _load() async {
     try {
-      return await _oddsService.fetchLiveOdds();
+      final odds = await _oddsService.fetchLiveOdds();
+      _lastLoadFailed = false;
+      return odds;
     } catch (_) {
+      _lastLoadFailed = true;
       return <LiveOdds>[];
     }
   }
@@ -115,7 +120,10 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
             final hiddenFallbackCount = allOdds.length - odds.length;
 
             if (odds.isEmpty) {
-              return _LiveOddsEmptyState(onRefresh: _refresh);
+              return _LiveOddsEmptyState(
+                onRefresh: _refresh,
+                loadFailed: snapshot.hasError || _lastLoadFailed,
+              );
             }
 
             return ListView.separated(
@@ -237,11 +245,27 @@ class _LiveOddsHeader extends StatelessWidget {
 
 class _LiveOddsEmptyState extends StatelessWidget {
   final Future<void> Function() onRefresh;
+  final bool loadFailed;
 
-  const _LiveOddsEmptyState({required this.onRefresh});
+  const _LiveOddsEmptyState({
+    required this.onRefresh,
+    required this.loadFailed,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final title = loadFailed
+        ? 'Quoten konnten nicht geladen werden'
+        : 'Heute keine Quoten verfügbar';
+
+    final message = loadFailed
+        ? 'Die Verbindung zur Quoten-API wurde unterbrochen oder API-Football hat die Anfrage abgelehnt. Bitte später erneut versuchen.'
+        : 'Heute sind keine Quoten verfügbar oder das API-Football-Limit wurde erreicht. Bitte später erneut versuchen.';
+
+    final icon = loadFailed
+        ? Icons.cloud_off_rounded
+        : Icons.info_outline_rounded;
+
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(24, 42, 24, 118),
@@ -266,10 +290,11 @@ class _LiveOddsEmptyState extends StatelessWidget {
         ),
         const SizedBox(height: 30),
         Container(
-          padding: const EdgeInsets.all(28),
+          padding: const EdgeInsets.all(26),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: const Color(0xFFE3ECF7)),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.07),
@@ -281,23 +306,23 @@ class _LiveOddsEmptyState extends StatelessWidget {
           child: Column(
             children: [
               Container(
-                width: 76,
-                height: 76,
+                width: 78,
+                height: 78,
                 decoration: BoxDecoration(
-                  color: Colors.indigo.withOpacity(0.10),
-                  shape: BoxShape.circle,
+                  color: const Color(0xFFEAF3FF),
+                  borderRadius: BorderRadius.circular(26),
                 ),
-                child: const Icon(
-                  Icons.casino_rounded,
+                child: Icon(
+                  icon,
                   size: 40,
-                  color: Colors.indigo,
+                  color: const Color(0xFF176CC7),
                 ),
               ),
               const SizedBox(height: 20),
-              const Text(
-                'Keine Live-Quoten gefunden',
+              Text(
+                title,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w900,
                   color: Color(0xFF111827),
@@ -305,19 +330,41 @@ class _LiveOddsEmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                'Die Quoten-Seite ist bereit. Falls API-Football für das Datum keine Odds liefert, bleibt die Liste leer.',
+                message,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.grey.shade700,
-                  height: 1.35,
+                  height: 1.38,
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(height: 18),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF6F8FC),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0xFFE3ECF7)),
+                ),
+                child: const Text(
+                  'Hinweis: Die App bleibt stabil. Es fehlen nur aktuelle Odds-Daten vom Anbieter.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF374151),
+                    fontWeight: FontWeight.w800,
+                    height: 1.3,
+                  ),
+                ),
+              ),
               const SizedBox(height: 22),
-              ElevatedButton.icon(
-                onPressed: onRefresh,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Neu laden'),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: onRefresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Erneut prüfen'),
+                ),
               ),
             ],
           ),
