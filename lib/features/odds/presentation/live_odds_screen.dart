@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:kickmind_ai/core/scoring/odds_score_service.dart';
 import 'package:kickmind_ai/features/odds/data/live_odds_service.dart';
 import 'package:kickmind_ai/features/odds/domain/live_odds.dart';
 
@@ -385,6 +386,7 @@ class _LiveOddsCard extends StatelessWidget {
     final subtitle = hasFallbackNames
         ? 'Quoten vorhanden · Fixture ${odds.matchId}'
         : 'Aktualisiert ${_formatDateTime(odds.updatedAt)}';
+    final relevance = _bestMarketRelevance(odds);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -455,6 +457,8 @@ class _LiveOddsCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
+          _AiRelevancePanel(relevance: relevance),
+          const SizedBox(height: 14),
           const Text(
             'Märkte',
             style: TextStyle(
@@ -503,6 +507,97 @@ class _LiveOddsCard extends StatelessWidget {
     final minute = value.minute.toString().padLeft(2, '0');
     return '$day.$month. $hour:$minute';
   }
+}
+
+
+_OddsRelevance _bestMarketRelevance(LiveOdds odds) {
+  final margin = _mainMarketMargin(odds);
+  final candidates = <_OddsRelevance>[
+    _evaluateMarket(
+      label: '1',
+      name: 'Heimsieg',
+      value: odds.homeWin,
+      marketType: OddsMarketType.home,
+      margin: margin,
+    ),
+    _evaluateMarket(
+      label: 'X',
+      name: 'Remis',
+      value: odds.draw,
+      marketType: OddsMarketType.draw,
+      margin: margin,
+    ),
+    _evaluateMarket(
+      label: '2',
+      name: 'Auswärtssieg',
+      value: odds.awayWin,
+      marketType: OddsMarketType.away,
+      margin: margin,
+    ),
+    if (odds.over25 != null)
+      _evaluateMarket(
+        label: 'Ü2.5',
+        name: 'Über 2.5 Tore',
+        value: odds.over25!,
+        marketType: OddsMarketType.over25,
+        margin: margin,
+      ),
+    if (odds.under25 != null)
+      _evaluateMarket(
+        label: 'U2.5',
+        name: 'Unter 2.5 Tore',
+        value: odds.under25!,
+        marketType: OddsMarketType.under25,
+        margin: margin,
+      ),
+    if (odds.bttsYes != null)
+      _evaluateMarket(
+        label: 'BTTS',
+        name: 'Beide treffen',
+        value: odds.bttsYes!,
+        marketType: OddsMarketType.btts,
+        margin: margin,
+      ),
+  ];
+
+  candidates.sort((a, b) => b.score.finalScore.compareTo(a.score.finalScore));
+  return candidates.first;
+}
+
+_OddsRelevance _evaluateMarket({
+  required String label,
+  required String name,
+  required double value,
+  required OddsMarketType marketType,
+  required double margin,
+}) {
+  final score = OddsScoreService.instance.evaluate(
+    oddsValue: value,
+    margin: margin,
+    marketType: marketType,
+  );
+  final decision = OddsScoreService.instance.decisionFor(
+    finalScore: score.finalScore,
+    valueEdge: score.valueEdge,
+    confidence: score.confidence,
+    riskLevel: score.riskLevel,
+    oddsValue: value,
+  );
+
+  return _OddsRelevance(
+    label: label,
+    name: name,
+    oddsValue: value,
+    score: score,
+    decision: decision,
+  );
+}
+
+double _mainMarketMargin(LiveOdds odds) {
+  final home = odds.homeWin > 1 ? 1 / odds.homeWin : 0.0;
+  final draw = odds.draw > 1 ? 1 / odds.draw : 0.0;
+  final away = odds.awayWin > 1 ? 1 / odds.awayWin : 0.0;
+  return (home + draw + away - 1).clamp(0.0, 0.22).toDouble();
 }
 
 
@@ -585,6 +680,174 @@ class _TeamTitle extends StatelessWidget {
     );
   }
 }
+
+class _OddsRelevance {
+  final String label;
+  final String name;
+  final double oddsValue;
+  final OddsMarketScore score;
+  final OddsMarketDecision decision;
+
+  const _OddsRelevance({
+    required this.label,
+    required this.name,
+    required this.oddsValue,
+    required this.score,
+    required this.decision,
+  });
+}
+
+class _AiRelevancePanel extends StatelessWidget {
+  final _OddsRelevance relevance;
+
+  const _AiRelevancePanel({required this.relevance});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _decisionColor(relevance.decision.type);
+    final scoreText = relevance.score.finalScore.toStringAsFixed(0);
+    final valueText = relevance.score.valueEdge >= 0
+        ? '+${relevance.score.valueEdge.toStringAsFixed(1)}'
+        : relevance.score.valueEdge.toStringAsFixed(1);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.09),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withOpacity(0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.auto_awesome_rounded, size: 18, color: color),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'KI-Relevanz · ${relevance.decision.label}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              _MiniScorePill(text: 'Score $scoreText', color: color),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _InfoPill(
+                label: 'Markt',
+                value: '${relevance.label} · ${relevance.name}',
+              ),
+              _InfoPill(
+                label: 'Quote',
+                value: relevance.oddsValue.toStringAsFixed(2),
+              ),
+              _InfoPill(
+                label: 'Risiko',
+                value: relevance.score.riskLevel,
+              ),
+              _InfoPill(
+                label: 'Value',
+                value: valueText,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _decisionColor(OddsMarketDecisionType type) {
+    switch (type) {
+      case OddsMarketDecisionType.premium:
+        return const Color(0xFF047857);
+      case OddsMarketDecisionType.value:
+        return const Color(0xFF0B4EA2);
+      case OddsMarketDecisionType.stable:
+        return const Color(0xFF6D5BD0);
+      case OddsMarketDecisionType.noBet:
+        return const Color(0xFFB45309);
+    }
+  }
+}
+
+class _MiniScorePill extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _MiniScorePill({required this.text, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.13),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoPill({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.82),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withOpacity(0.9)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label ',
+            style: const TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF111827),
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 class _OddsBadge extends StatelessWidget {
   final String label;
