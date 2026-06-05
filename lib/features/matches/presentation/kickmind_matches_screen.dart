@@ -100,7 +100,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleSpacing: 20,
-        toolbarHeight: 86,
+        toolbarHeight: 78,
         title: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -109,7 +109,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
               'KickMind AI',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 26,
+                fontSize: 24,
                 fontWeight: FontWeight.w900,
                 letterSpacing: -0.3,
               ),
@@ -173,7 +173,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
             return RefreshIndicator(
               onRefresh: () async => _reload(),
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 132),
                 children: [
                   _StartHero(
                     rangeLabel: _range.label,
@@ -184,13 +184,13 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                     onFilterTap: () => _openFilter(rawMatches),
                     onTopTipsTap: _openTopTips,
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 10),
 
                   _RangeSelector(
                     selected: _range,
                     onChanged: _changeRange,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
 
                   if (_activeFilter != null)
                     _ActiveFilterBanner(
@@ -201,7 +201,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                   if (topPick != null) ...[
                     _SectionHeader(
                       title: '🔥 Premium Top Pick',
-                      subtitle: 'Nur Tipps mit finaler zentraler Bewertung',
+                      subtitle: 'Final-Score Empfehlung',
                       actionLabel: 'Details',
                       onActionTap: () => _openDetail(topPick),
                     ),
@@ -221,7 +221,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                   if (valuePick != null) ...[
                     _SectionHeader(
                       title: '💰 Beste Value Bet',
-                      subtitle: 'AI-Wahrscheinlichkeit gegen implizite Quote',
+                      subtitle: 'Quote gegen AI-Wahrscheinlichkeit',
                       actionLabel: 'Öffnen',
                       onActionTap: () => _openDetail(valuePick),
                     ),
@@ -248,7 +248,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                   if (visibleTopTips.isNotEmpty) ...[
                     _SectionHeader(
                       title: 'Top 3 Premium-Auswahl',
-                      subtitle: 'Zentrale Final-Score-Logik aus TopTipScoreService',
+                      subtitle: 'Beste Signale aus Final-Score',
                       actionLabel: 'Alle',
                       onActionTap: _openTopTips,
                     ),
@@ -330,7 +330,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
     final edgeText = score.valueEdge >= 0
         ? '+${score.valueEdge.toStringAsFixed(1)}%'
         : '${score.valueEdge.toStringAsFixed(1)}%';
-    return '${score.recommendationLabel}: AI ${match.aiScore}% · Value Edge $edgeText · Risiko ${match.riskLevel} · Quote ${match.odds.toStringAsFixed(2)}';
+    return '${score.recommendationLabel} · AI ${match.aiScore}% · Edge $edgeText · Risiko ${match.riskLevel} · Quote ${match.odds.toStringAsFixed(2)}';
   }
 }
 
@@ -356,14 +356,14 @@ class _StartHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF0D47A1), Color(0xFF1565C0), Color(0xFF00A676)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
             color: KickMindTheme.primary.withOpacity(0.22),
@@ -378,13 +378,13 @@ class _StartHero extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                child: const Icon(Icons.psychology_alt_rounded, color: Colors.white),
+                child: const Icon(Icons.psychology_alt_rounded, color: Colors.white, size: 21),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -393,7 +393,7 @@ class _StartHero extends StatelessWidget {
                   children: [
                     const Text(
                       'KickMind AI Radar',
-                      style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -413,7 +413,7 @@ class _StartHero extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(child: _HeroMetric(label: 'Premium', value: '$strongCount')),
@@ -423,7 +423,7 @@ class _StartHero extends StatelessWidget {
               Expanded(child: _HeroMetric(label: 'Ø Final', value: '$avgFinal')),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
@@ -452,7 +452,7 @@ class _HeroMetric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.14),
         borderRadius: BorderRadius.circular(16),
@@ -463,7 +463,7 @@ class _HeroMetric extends StatelessWidget {
         children: [
           Text(label, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, fontSize: 12)),
           const SizedBox(height: 4),
-          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18)),
+          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16)),
         ],
       ),
     );
@@ -572,7 +572,7 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: KickMindTheme.surface,
         borderRadius: BorderRadius.circular(18),
@@ -581,9 +581,9 @@ class _StatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 8),
-          Text(value, style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.w900)),
+          Icon(icon, color: color, size: 18),
+          const SizedBox(height: 6),
+          Text(value, style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.w900)),
           const SizedBox(height: 2),
           Text(label, style: const TextStyle(color: KickMindTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w800)),
         ],
@@ -617,7 +617,7 @@ class _HighlightCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(22),
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: KickMindTheme.surface,
           borderRadius: BorderRadius.circular(22),
@@ -630,29 +630,29 @@ class _HighlightCard extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  width: 42,
-                  height: 42,
+                  width: 38,
+                  height: 38,
                   decoration: BoxDecoration(color: accentColor.withOpacity(0.12), borderRadius: BorderRadius.circular(15)),
-                  child: Icon(icon, color: accentColor),
+                  child: Icon(icon, color: accentColor, size: 21),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: TextStyle(color: accentColor, fontWeight: FontWeight.w900, fontSize: 13)),
+                      Text(title, style: TextStyle(color: accentColor, fontWeight: FontWeight.w900, fontSize: 12)),
                       const SizedBox(height: 2),
-                      Text(match.teamsLabel, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+                      Text(match.teamsLabel, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
                     ],
                   ),
                 ),
                 const Icon(Icons.chevron_right_rounded),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: 6,
+              runSpacing: 6,
               children: [
                 _Badge(text: badgeText, color: accentColor),
                 _Badge(text: '${match.riskEmoji} ${match.riskLevel}', color: KickMindTheme.riskColor(match.riskLevel)),
@@ -660,8 +660,8 @@ class _HighlightCard extends StatelessWidget {
               ],
             ),
             if (footerText.trim().isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(footerText, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: KickMindTheme.textMuted, height: 1.35, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text(footerText, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: KickMindTheme.textMuted, height: 1.35, fontWeight: FontWeight.w700)),
             ],
           ],
         ),
@@ -685,8 +685,8 @@ class _TopTipMiniCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: color.withOpacity(0.08),
           borderRadius: BorderRadius.circular(16),
@@ -699,7 +699,7 @@ class _TopTipMiniCard extends StatelessWidget {
                 '${score.isValueBet ? '💰 ' : ''}${match.teamsLabel}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Color(0xFF111827), fontWeight: FontWeight.w900, fontSize: 15),
+                style: const TextStyle(color: Color(0xFF111827), fontWeight: FontWeight.w900, fontSize: 14),
               ),
             ),
             const SizedBox(width: 8),
@@ -745,7 +745,7 @@ class _SectionHeader extends StatelessWidget {
                 title,
                 style: const TextStyle(
                   color: Color(0xFF111827),
-                  fontSize: 20,
+                  fontSize: 18,
                   fontWeight: FontWeight.w900,
                   height: 1.15,
                 ),
@@ -755,7 +755,7 @@ class _SectionHeader extends StatelessWidget {
                 subtitle,
                 style: const TextStyle(
                   color: Color(0xFF6B7280),
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w700,
                   height: 1.25,
                 ),
@@ -788,9 +788,9 @@ class _Badge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(999)),
-      child: Text(text, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w900)),
+      child: Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w900)),
     );
   }
 }
@@ -801,7 +801,7 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(color: KickMindTheme.surface, borderRadius: BorderRadius.circular(18)),
       child: const Column(
         children: [
@@ -822,17 +822,17 @@ class _LoadingState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 132),
       children: const [
-        _SkeletonBox(height: 150),
+        _SkeletonBox(height: 132),
         SizedBox(height: 14),
         _SkeletonBox(height: 44),
         SizedBox(height: 14),
-        _SkeletonBox(height: 118),
+        _SkeletonBox(height: 104),
         SizedBox(height: 12),
-        _SkeletonBox(height: 118),
+        _SkeletonBox(height: 104),
         SizedBox(height: 12),
-        _SkeletonBox(height: 118),
+        _SkeletonBox(height: 104),
       ],
     );
   }
