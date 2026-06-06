@@ -8,6 +8,7 @@ import 'package:kickmind_ai/features/matches/domain/match_date_range.dart';
 import 'package:kickmind_ai/features/matches/presentation/widgets/match_card.dart';
 import 'package:kickmind_ai/features/top_tips/presentation/top_tips_screen.dart';
 import 'package:kickmind_ai/features/matches/presentation/match_detail_screen.dart';
+import 'package:kickmind_ai/features/saved_tips/data/saved_tips_service.dart';
 
 class KickMindMatchesScreen extends StatefulWidget {
   const KickMindMatchesScreen({super.key});
@@ -19,21 +20,25 @@ class KickMindMatchesScreen extends StatefulWidget {
 class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
   final MatchRepositoryImpl _repo = MatchRepositoryImpl();
   final TopTipScoreService _scoreService = TopTipScoreService.instance;
+  final SavedTipsService _savedTipsService = SavedTipsService();
 
   MatchDateRange _range = MatchDateRange.today;
   FilterResult? _activeFilter;
   late Future<List<FootballMatch>> _future;
+  Set<String> _savedMatchIds = <String>{};
 
   @override
   void initState() {
     super.initState();
     _future = _repo.getMatches(range: _range);
+    _loadSavedIds();
   }
 
   void _reload() {
     setState(() {
       _future = _repo.getMatches(range: _range);
     });
+    _loadSavedIds();
   }
 
   void _changeRange(MatchDateRange range) {
@@ -87,6 +92,40 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
 
       return true;
     }).toList();
+  }
+
+  Future<void> _loadSavedIds() async {
+    final saved = await _savedTipsService.loadSavedTips();
+    if (!mounted) return;
+    setState(() {
+      _savedMatchIds = saved.map((m) => m.id).toSet();
+    });
+  }
+
+  Future<void> _toggleSavedTip(FootballMatch match) async {
+    final isSaved = _savedMatchIds.contains(match.id);
+
+    if (isSaved) {
+      await _savedTipsService.removeTip(match.id);
+    } else {
+      await _savedTipsService.saveTip(match);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      if (isSaved) {
+        _savedMatchIds.remove(match.id);
+      } else {
+        _savedMatchIds.add(match.id);
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isSaved ? 'Tipp entfernt' : 'Tipp gespeichert'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -213,6 +252,8 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                       accentColor: KickMindTheme.scoreColor(topPick.aiScore),
                       badgeText: _decisionLabel(topPick),
                       footerText: _decisionReason(topPick),
+                      isSaved: _savedMatchIds.contains(topPick.id),
+                      onSaveTap: () => _toggleSavedTip(topPick),
                       onTap: () => _openDetail(topPick),
                     ),
                     const SizedBox(height: 18),
@@ -233,6 +274,8 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                       accentColor: KickMindTheme.success,
                       badgeText: _decisionLabel(valuePick),
                       footerText: _decisionReason(valuePick),
+                      isSaved: _savedMatchIds.contains(valuePick.id),
+                      onSaveTap: () => _toggleSavedTip(valuePick),
                       onTap: () => _openDetail(valuePick),
                     ),
                     const SizedBox(height: 18),
@@ -257,6 +300,8 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                           (m) => _TopTipMiniCard(
                         match: m,
                         score: _scoreService.score(m),
+                        isSaved: _savedMatchIds.contains(m.id),
+                        onSaveTap: () => _toggleSavedTip(m),
                         onTap: () => _openDetail(m),
                       ),
                     ),
@@ -278,9 +323,11 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                           (match) => MatchCard(
                         match: match,
                         onTap: () => _openDetail(match),
-                        trailing: _scoreService.score(match).isValueBet
-                            ? const _MiniValueBadge()
-                            : null,
+                        trailing: _SaveTipChip(
+                          isSaved: _savedMatchIds.contains(match.id),
+                          isValueBet: _scoreService.score(match).isValueBet,
+                          onTap: () => _toggleSavedTip(match),
+                        ),
                       ),
                     ),
                 ],
@@ -296,7 +343,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => MatchDetailScreen(match: match)),
-    );
+    ).then((_) => _loadSavedIds());
   }
 
   void _openTopTips() {
@@ -599,6 +646,8 @@ class _HighlightCard extends StatelessWidget {
   final Color accentColor;
   final String badgeText;
   final String footerText;
+  final bool isSaved;
+  final VoidCallback onSaveTap;
   final VoidCallback onTap;
 
   const _HighlightCard({
@@ -608,6 +657,8 @@ class _HighlightCard extends StatelessWidget {
     required this.accentColor,
     required this.badgeText,
     required this.footerText,
+    required this.isSaved,
+    required this.onSaveTap,
     required this.onTap,
   });
 
@@ -646,7 +697,14 @@ class _HighlightCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                const Icon(Icons.chevron_right_rounded),
+                IconButton(
+                  tooltip: isSaved ? 'Tipp entfernen' : 'Tipp speichern',
+                  onPressed: onSaveTap,
+                  icon: Icon(
+                    isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                    color: isSaved ? KickMindTheme.primary : KickMindTheme.textMuted,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 10),
@@ -673,9 +731,11 @@ class _HighlightCard extends StatelessWidget {
 class _TopTipMiniCard extends StatelessWidget {
   final FootballMatch match;
   final TopTipScore score;
+  final bool isSaved;
+  final VoidCallback onSaveTap;
   final VoidCallback onTap;
 
-  const _TopTipMiniCard({required this.match, required this.score, required this.onTap});
+  const _TopTipMiniCard({required this.match, required this.score, required this.isSaved, required this.onSaveTap, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -710,6 +770,15 @@ class _TopTipMiniCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text('Final ${score.finalScore.toStringAsFixed(0)}', style: const TextStyle(color: KickMindTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w800)),
               ],
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: isSaved ? 'Tipp entfernen' : 'Tipp speichern',
+              onPressed: onSaveTap,
+              icon: Icon(
+                isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                color: isSaved ? KickMindTheme.primary : KickMindTheme.textMuted,
+              ),
             ),
           ],
         ),
@@ -765,6 +834,63 @@ class _SectionHeader extends StatelessWidget {
         ),
         if (actionLabel != null && onActionTap != null)
           TextButton(onPressed: onActionTap, child: Text(actionLabel!)),
+      ],
+    );
+  }
+}
+
+
+class _SaveTipChip extends StatelessWidget {
+  final bool isSaved;
+  final bool isValueBet;
+  final VoidCallback onTap;
+
+  const _SaveTipChip({
+    required this.isSaved,
+    required this.isValueBet,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        if (isValueBet) const _MiniValueBadge(),
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: (isSaved ? KickMindTheme.primary : KickMindTheme.textMuted).withOpacity(0.10),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: (isSaved ? KickMindTheme.primary : KickMindTheme.textMuted).withOpacity(0.20),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                  size: 15,
+                  color: isSaved ? KickMindTheme.primary : KickMindTheme.textMuted,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  isSaved ? 'Gespeichert' : 'Speichern',
+                  style: TextStyle(
+                    color: isSaved ? KickMindTheme.primary : KickMindTheme.textMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }

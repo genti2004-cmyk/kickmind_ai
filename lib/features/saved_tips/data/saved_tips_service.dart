@@ -10,19 +10,43 @@ class SavedTipsService {
     final prefs = await SharedPreferences.getInstance();
     final rawItems = prefs.getStringList(_key) ?? const <String>[];
     final result = <FootballMatch>[];
+    var needsCleanup = false;
 
     for (final raw in rawItems) {
       try {
         final decoded = jsonDecode(raw);
         if (decoded is Map<String, dynamic>) {
-          result.add(FootballMatch.fromJson(decoded));
+          final match = FootballMatch.fromJson(decoded);
+          if (_isRealSavedMatch(match)) {
+            result.add(match);
+          } else {
+            needsCleanup = true;
+          }
         }
       } catch (_) {
+        needsCleanup = true;
         // Ignore corrupted entries instead of crashing the app.
       }
     }
 
+    if (needsCleanup) {
+      await prefs.setStringList(
+        _key,
+        result.map((m) => jsonEncode(m.toJson())).toList(),
+      );
+    }
+
     return result;
+  }
+
+  bool _isRealSavedMatch(FootballMatch match) {
+    final id = match.id.trim().toLowerCase();
+    if (id.isEmpty) return false;
+    if (id.startsWith('fallback_')) return false;
+    if (id.startsWith('mock_')) return false;
+    if (id.startsWith('match_')) return false;
+    if (match.homeTeam.trim().isEmpty || match.awayTeam.trim().isEmpty) return false;
+    return true;
   }
 
   Future<bool> isSaved(String matchId) async {

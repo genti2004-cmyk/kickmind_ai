@@ -6,6 +6,7 @@ import 'package:kickmind_ai/features/matches/data/repositories/match_repository_
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/matches/domain/match_date_range.dart';
 import 'package:kickmind_ai/features/matches/presentation/match_detail_screen.dart';
+import 'package:kickmind_ai/features/saved_tips/data/saved_tips_service.dart';
 
 class TopTipsScreen extends StatefulWidget {
   const TopTipsScreen({super.key});
@@ -17,14 +18,17 @@ class TopTipsScreen extends StatefulWidget {
 class _TopTipsScreenState extends State<TopTipsScreen> {
   final MatchRepositoryImpl _repository = MatchRepositoryImpl();
   final TopTipScoreService _scoreService = TopTipScoreService.instance;
+  final SavedTipsService _savedTipsService = SavedTipsService();
 
   MatchDateRange _range = MatchDateRange.today;
   late Future<List<FootballMatch>> _future;
+  Set<String> _savedMatchIds = <String>{};
 
   @override
   void initState() {
     super.initState();
     _future = _load();
+    _loadSavedIds();
   }
 
   Future<List<FootballMatch>> _load() {
@@ -42,7 +46,42 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
 
   Future<void> _refresh() async {
     setState(() => _future = _load());
+    _loadSavedIds();
     await _future;
+  }
+
+  Future<void> _loadSavedIds() async {
+    final saved = await _savedTipsService.loadSavedTips();
+    if (!mounted) return;
+    setState(() {
+      _savedMatchIds = saved.map((m) => m.id).toSet();
+    });
+  }
+
+  Future<void> _toggleSavedTip(FootballMatch match) async {
+    final isSaved = _savedMatchIds.contains(match.id);
+
+    if (isSaved) {
+      await _savedTipsService.removeTip(match.id);
+    } else {
+      await _savedTipsService.saveTip(match);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      if (isSaved) {
+        _savedMatchIds.remove(match.id);
+      } else {
+        _savedMatchIds.add(match.id);
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isSaved ? 'Tipp entfernt' : 'Tipp gespeichert'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -131,6 +170,8 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                     finalScore: _finalScore(match),
                     valueEdge: _valueEdge(match),
                     confidence: _confidence(match),
+                    isSaved: _savedMatchIds.contains(match.id),
+                    onSaveTap: () => _toggleSavedTip(match),
                     onTap: () => _openDetail(match),
                   ),
                 ),
@@ -146,6 +187,8 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                         (match) => _CompactTipCard(
                       match: match,
                       finalScore: _finalScore(match),
+                      isSaved: _savedMatchIds.contains(match.id),
+                      onSaveTap: () => _toggleSavedTip(match),
                       onTap: () => _openDetail(match),
                     ),
                   ),
@@ -162,6 +205,8 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                         (match) => _CompactTipCard(
                       match: match,
                       finalScore: _finalScore(match),
+                      isSaved: _savedMatchIds.contains(match.id),
+                      onSaveTap: () => _toggleSavedTip(match),
                       onTap: () => _openDetail(match),
                     ),
                   ),
@@ -180,7 +225,7 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
       MaterialPageRoute(
         builder: (_) => MatchDetailScreen(match: match),
       ),
-    );
+    ).then((_) => _loadSavedIds());
   }
 
   int _compareByFinalScore(FootballMatch a, FootballMatch b) {
@@ -442,6 +487,8 @@ class _TopTipCard extends StatelessWidget {
   final double finalScore;
   final double valueEdge;
   final double confidence;
+  final bool isSaved;
+  final VoidCallback onSaveTap;
   final VoidCallback onTap;
 
   const _TopTipCard({
@@ -450,6 +497,8 @@ class _TopTipCard extends StatelessWidget {
     required this.finalScore,
     required this.valueEdge,
     required this.confidence,
+    required this.isSaved,
+    required this.onSaveTap,
     required this.onTap,
   });
 
@@ -510,6 +559,15 @@ class _TopTipCard extends StatelessWidget {
                     color: KickMindTheme.textMuted,
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: isSaved ? 'Tipp entfernen' : 'Tipp speichern',
+                  onPressed: onSaveTap,
+                  icon: Icon(
+                    isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                    color: isSaved ? KickMindTheme.primary : KickMindTheme.textMuted,
                   ),
                 ),
               ],
@@ -774,11 +832,15 @@ class _MiniScorePill extends StatelessWidget {
 class _CompactTipCard extends StatelessWidget {
   final FootballMatch match;
   final double finalScore;
+  final bool isSaved;
+  final VoidCallback onSaveTap;
   final VoidCallback onTap;
 
   const _CompactTipCard({
     required this.match,
     required this.finalScore,
+    required this.isSaved,
+    required this.onSaveTap,
     required this.onTap,
   });
 
@@ -848,8 +910,15 @@ class _CompactTipCard extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            const Icon(Icons.chevron_right_rounded, color: KickMindTheme.textMuted),
+            const SizedBox(width: 6),
+            IconButton(
+              tooltip: isSaved ? 'Tipp entfernen' : 'Tipp speichern',
+              onPressed: onSaveTap,
+              icon: Icon(
+                isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                color: isSaved ? KickMindTheme.primary : KickMindTheme.textMuted,
+              ),
+            ),
           ],
         ),
       ),

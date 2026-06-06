@@ -3,9 +3,9 @@ class KickMindFeatureFlags {
 
   /// Sicherer Standard:
   /// - API an
-  /// - Mock-Fallback an, damit die App nicht crasht
+  /// - Mock-Fallback aus, damit keine Dummy-Spiele in der echten App erscheinen
   /// - Pro-Enrichment an, damit AI-Score/Risiko sichtbar bleiben
   static const bool useRealApi = true;
-  static const bool allowMockFallback = true;
+  static const bool allowMockFallback = false;
   static const bool useProEnrichment = true;
 }
