@@ -14,13 +14,15 @@ class MainNavigationScreen extends StatefulWidget {
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _tabIndex = 0;
+  int _topTipsRefreshKey = 0;
+  int _savedTipsRefreshKey = 0;
 
-  static const List<Widget> _pages = <Widget>[
-    KickMindMatchesScreen(),
-    TopTipsScreen(),
-    AnalysisScreen(),
-    SavedTipsScreen(),
-    LiveOddsScreen(),
+  List<Widget> get _pages => <Widget>[
+    const KickMindMatchesScreen(),
+    TopTipsScreen(key: ValueKey<String>('top_tips_$_topTipsRefreshKey')),
+    const AnalysisScreen(),
+    SavedTipsScreen(key: ValueKey<String>('saved_tips_$_savedTipsRefreshKey')),
+    const LiveOddsScreen(),
   ];
 
   static const List<NavigationDestination> _destinations = <NavigationDestination>[
@@ -52,8 +54,18 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   ];
 
   void _selectTab(int value) {
-    if (value == _tabIndex) return;
-    setState(() => _tabIndex = value);
+    setState(() {
+      _tabIndex = value;
+
+      // These tabs load async data and are kept alive by IndexedStack.
+      // Re-key them when opened so newly saved tips and late API results
+      // are visible immediately without restarting the app.
+      if (value == 1) {
+        _topTipsRefreshKey++;
+      } else if (value == 3) {
+        _savedTipsRefreshKey++;
+      }
+    });
   }
 
   @override
