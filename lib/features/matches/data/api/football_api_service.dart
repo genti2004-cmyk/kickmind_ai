@@ -30,6 +30,42 @@ class FootballApiService {
   static const Duration _cacheDuration = Duration(minutes: 2);
   static const Duration _diskCacheMaxAge = Duration(hours: 18);
   static const int _maxDaysPerRequest = 7;
+  static const int _minimumFixtureTargetPerDay = 8;
+
+  // API-Football Free/Plan-Limit-Schutz:
+  // Sobald API-Football meldet, dass das Tageslimit erreicht ist, stoppen wir
+  // weitere API-Football-Requests in dieser App-Sitzung und nutzen nur noch
+  // echte Fallback-Spielpläne. So wird das Limit nicht durch Folge-Requests
+  // weiter belastet und die App bleibt stabil.
+  static bool _apiFootballDailyLimitReached = false;
+  static String? _apiFootballDailyLimitDateKey;
+
+  static const List<_ApiLeagueRef> _supplementalApiFootballLeagues = <_ApiLeagueRef>[
+    _ApiLeagueRef(1),
+    _ApiLeagueRef(2),
+    _ApiLeagueRef(3),
+    _ApiLeagueRef(4),
+    _ApiLeagueRef(10),
+    _ApiLeagueRef(15),
+    _ApiLeagueRef(39),
+    _ApiLeagueRef(40),
+    _ApiLeagueRef(61),
+    _ApiLeagueRef(78),
+    _ApiLeagueRef(88),
+    _ApiLeagueRef(94),
+    _ApiLeagueRef(103),
+    _ApiLeagueRef(113),
+    _ApiLeagueRef(119),
+    _ApiLeagueRef(135),
+    _ApiLeagueRef(140),
+    _ApiLeagueRef(144),
+    _ApiLeagueRef(203),
+    _ApiLeagueRef(218),
+    _ApiLeagueRef(244),
+    _ApiLeagueRef(253),
+    _ApiLeagueRef(71),
+    _ApiLeagueRef(128),
+  ];
 
   static const List<String> _acceptedBookmakerNames = <String>[
     'betano',
@@ -59,7 +95,7 @@ class FootballApiService {
   }) async {
     final normalizedStart = DateTime(start.year, start.month, start.day);
     final safeDays = days.clamp(1, _maxDaysPerRequest).toInt();
-    final key = 'sofascore_style_${_formatDate(normalizedStart)}_$safeDays';
+    final key = 'sofascore_style_v3_${_formatDate(normalizedStart)}_$safeDays';
     final now = DateTime.now();
 
     if (!forceRefresh && _rangeCache.containsKey(key)) {
@@ -114,14 +150,39 @@ class FootballApiService {
       }
     }
 
-    // Wenn API-Football /fixtures leer liefert, nutzen wir TheSportsDB nur als
-    // echten Spielplan-Fallback. Quoten kommen weiterhin ausschließlich aus
-    // API-Football /odds und werden nicht erfunden.
-    if (fixtureMatches.isEmpty) {
+    final minimumFixtureTarget = safeDays * _minimumFixtureTargetPerDay;
+
+    // Wenn /fixtures?date=... nur sehr wenige Spiele liefert, ergänzen wir mit
+    // echten API-Football-League-Abfragen für denselben Zeitraum. Dadurch wird
+    // die Liste nicht künstlich auf 3 Spiele pro Tag begrenzt.
+    if (fixtureMatches.length < minimumFixtureTarget) {
+      final supplementalFixtures = await _fetchApiFootballFixturesByLeagueRange(
+        start: normalizedStart,
+        days: safeDays,
+        currentCount: fixtureMatches.length,
+      );
+      fixtureMatches.addAll(supplementalFixtures);
+    }
+
+    // Wenn API-Football /fixtures weiter leer oder zu klein bleibt, nutzen wir
+    // TheSportsDB als echten Spielplan-Fallback. Keine Dummy-Spiele.
+    if (fixtureMatches.length < minimumFixtureTarget) {
       for (var offset = 0; offset < safeDays; offset++) {
         final day = normalizedStart.add(Duration(days: offset));
         final dayFixtures = await _fetchDayFromSportsDb(day);
         fixtureMatches.addAll(dayFixtures);
+      }
+    }
+
+    // Odds werden ebenfalls nur echt ergänzt: zuerst Datum, danach League/Season.
+    if (oddsByFixtureId.length < safeDays * 4) {
+      final supplementalOdds = await _fetchAcceptedOddsByLeagueRange(
+        start: normalizedStart,
+        days: safeDays,
+        currentCount: oddsByFixtureId.length,
+      );
+      for (final odds in supplementalOdds) {
+        oddsByFixtureId[odds.fixtureId] = odds;
       }
     }
 
@@ -191,10 +252,10 @@ class FootballApiService {
   }
 
   Future<List<FootballMatch>> _loadPersistedRange(
-    String key,
-    DateTime normalizedStart,
-    int safeDays,
-  ) async {
+      String key,
+      DateTime normalizedStart,
+      int safeDays,
+      ) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_diskCacheKey(key));
@@ -252,8 +313,14 @@ class FootballApiService {
   }
 
   Future<List<FootballMatch>> _fetchFixturesForDayOnline(DateTime day) async {
+    final date = _formatDate(day);
+    if (_isApiFootballDailyLimitBlocked()) {
+      // ignore: avoid_print
+      print('API-FOOTBALL LIMIT SKIP fixtures $date');
+      return <FootballMatch>[];
+    }
+
     try {
-      final date = _formatDate(day);
       final uri = Uri.parse('${ApiConfig.footballBaseUrl}/fixtures?date=$date');
       final response = await _client.get(
         uri,
@@ -270,6 +337,9 @@ class FootballApiService {
 
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) return <FootballMatch>[];
+      if (_markApiFootballDailyLimitIfNeeded(decoded, context: 'fixtures $date')) {
+        return <FootballMatch>[];
+      }
 
       final rawResponse = decoded['response'];
       if (rawResponse is! List || rawResponse.isEmpty) {
@@ -295,6 +365,155 @@ class FootballApiService {
     }
   }
 
+
+  Future<List<FootballMatch>> _fetchApiFootballFixturesByLeagueRange({
+    required DateTime start,
+    required int days,
+    required int currentCount,
+  }) async {
+    final result = <FootballMatch>[];
+    final from = _formatDate(start);
+    final to = _formatDate(start.add(Duration(days: days - 1)));
+    if (_isApiFootballDailyLimitBlocked()) {
+      // ignore: avoid_print
+      print('API-FOOTBALL LIMIT SKIP fixtures league supplement $from-$to');
+      return <FootballMatch>[];
+    }
+    final target = days * _minimumFixtureTargetPerDay;
+    final seasons = _seasonCandidates(start);
+
+    for (final league in _supplementalApiFootballLeagues) {
+      for (final season in seasons) {
+        if (currentCount + result.length >= target * 2) break;
+
+        try {
+          final uri = Uri.parse(
+            '${ApiConfig.footballBaseUrl}/fixtures?league=${league.id}&season=$season&from=$from&to=$to&timezone=Europe/Tirane',
+          );
+          final response = await _client.get(
+            uri,
+            headers: <String, String>{
+              'x-apisports-key': ApiConfig.footballApiKey,
+            },
+          ).timeout(const Duration(seconds: 12));
+
+          if (response.statusCode != 200) continue;
+
+          final decoded = jsonDecode(response.body);
+          if (decoded is! Map<String, dynamic>) continue;
+          if (_markApiFootballDailyLimitIfNeeded(
+            decoded,
+            context: 'fixtures league ${league.id} season $season $from-$to',
+          )) {
+            return _dedupeAndSort(result);
+          }
+
+          final rawResponse = decoded['response'];
+          if (rawResponse is! List || rawResponse.isEmpty) continue;
+
+          for (final raw in rawResponse) {
+            final item = _asMap(raw);
+            if (item == null) continue;
+            final match = _buildFixtureOnlyMatch(item, fallbackDay: start);
+            if (match != null && _isInsideRange(match.kickoff, start, days)) {
+              result.add(match);
+            }
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+    }
+
+    final sorted = _dedupeAndSort(result);
+    // ignore: avoid_print
+    print('FIXTURES LEAGUE SUPPLEMENT $from-$to: ${sorted.length}');
+    return sorted;
+  }
+
+  Future<List<_OddsSnapshot>> _fetchAcceptedOddsByLeagueRange({
+    required DateTime start,
+    required int days,
+    required int currentCount,
+  }) async {
+    final result = <_OddsSnapshot>[];
+    final from = _formatDate(start);
+    final to = _formatDate(start.add(Duration(days: days - 1)));
+    if (_isApiFootballDailyLimitBlocked()) {
+      // ignore: avoid_print
+      print('API-FOOTBALL LIMIT SKIP odds league supplement $from-$to');
+      return <_OddsSnapshot>[];
+    }
+    final target = (days * 12).clamp(12, 80).toInt();
+    final seasons = _seasonCandidates(start);
+
+    for (final league in _supplementalApiFootballLeagues.take(16)) {
+      for (final season in seasons) {
+        if (currentCount + result.length >= target) break;
+
+        for (var page = 1; page <= 4; page++) {
+          try {
+            final uri = Uri.parse(
+              '${ApiConfig.footballBaseUrl}/odds?league=${league.id}&season=$season&page=$page',
+            );
+            final response = await _client.get(
+              uri,
+              headers: <String, String>{
+                'x-apisports-key': ApiConfig.footballApiKey,
+              },
+            ).timeout(const Duration(seconds: 12));
+
+            if (response.statusCode != 200) break;
+
+            final decoded = jsonDecode(response.body);
+            if (decoded is! Map<String, dynamic>) break;
+            if (_markApiFootballDailyLimitIfNeeded(
+              decoded,
+              context: 'odds league ${league.id} season $season page $page',
+            )) {
+              return result;
+            }
+
+            final rawResponse = decoded['response'];
+            if (rawResponse is! List || rawResponse.isEmpty) break;
+
+            for (final raw in rawResponse) {
+              final item = _asMap(raw);
+              if (item == null) continue;
+              final odds = await _readOddsSnapshot(item, fallbackDay: start);
+              if (odds != null && _isInsideRange(odds.kickoff, start, days)) {
+                result.add(odds);
+              }
+            }
+
+            final paging = _asMap(decoded['paging']);
+            final current = int.tryParse(paging?['current']?.toString() ?? '') ?? page;
+            final total = int.tryParse(paging?['total']?.toString() ?? '') ?? page;
+            if (current >= total) break;
+          } catch (_) {
+            break;
+          }
+        }
+      }
+    }
+
+    final unique = <int, _OddsSnapshot>{};
+    for (final odds in result) {
+      unique[odds.fixtureId] = odds;
+    }
+
+    final sorted = unique.values.toList()
+      ..sort((a, b) => a.kickoff.compareTo(b.kickoff));
+    // ignore: avoid_print
+    print('ODDS LEAGUE SUPPLEMENT $from-$to: ${sorted.length}');
+    return sorted;
+  }
+
+  List<int> _seasonCandidates(DateTime start) {
+    final seasons = <int>{start.year, start.year - 1};
+    if (start.month >= 7) seasons.add(start.year + 1);
+    return seasons.toList()..sort((a, b) => b.compareTo(a));
+  }
 
   Future<List<FootballMatch>> _fetchDayFromSportsDb(DateTime day) async {
     try {
@@ -371,9 +590,9 @@ class FootballApiService {
   }
 
   DateTime _parseSportsDbKickoff(
-    Map<String, dynamic> raw, {
-    required DateTime fallbackDay,
-  }) {
+      Map<String, dynamic> raw, {
+        required DateTime fallbackDay,
+      }) {
     final timestamp = _clean(raw['strTimestamp']);
     if (timestamp != null) {
       final parsedTimestamp = DateTime.tryParse(timestamp.replaceAll(' ', 'T'));
@@ -454,9 +673,9 @@ class FootballApiService {
   }
 
   FootballMatch? _buildFixtureOnlyMatch(
-    Map<String, dynamic> item, {
-    required DateTime fallbackDay,
-  }) {
+      Map<String, dynamic> item, {
+        required DateTime fallbackDay,
+      }) {
     final fixture = _asMap(item['fixture']);
     final league = _asMap(item['league']);
     final teams = _asMap(item['teams']);
@@ -511,10 +730,16 @@ class FootballApiService {
 
   Future<List<_OddsSnapshot>> _fetchAcceptedOddsForDayOnline(DateTime day) async {
     final result = <_OddsSnapshot>[];
+    final date = _formatDate(day);
+
+    if (_isApiFootballDailyLimitBlocked()) {
+      // ignore: avoid_print
+      print('API-FOOTBALL LIMIT SKIP odds $date');
+      return <_OddsSnapshot>[];
+    }
 
     for (var page = 1; page <= 20; page++) {
       try {
-        final date = _formatDate(day);
         final uri = Uri.parse('${ApiConfig.footballBaseUrl}/odds?date=$date&page=$page');
 
         final response = await _client.get(
@@ -528,6 +753,9 @@ class FootballApiService {
 
         final decoded = jsonDecode(response.body);
         if (decoded is! Map<String, dynamic>) break;
+        if (_markApiFootballDailyLimitIfNeeded(decoded, context: 'odds $date page $page')) {
+          break;
+        }
 
         final rawResponse = decoded['response'];
         if (rawResponse is! List || rawResponse.isEmpty) break;
@@ -548,13 +776,15 @@ class FootballApiService {
       }
     }
 
+    // ignore: avoid_print
+    print('ODDS PARSED ${_formatDate(day)}: ${result.length} usable real bookmaker odds');
     return result;
   }
 
   Future<_OddsSnapshot?> _readOddsSnapshot(
-    Map<String, dynamic> item, {
-    required DateTime fallbackDay,
-  }) async {
+      Map<String, dynamic> item, {
+        required DateTime fallbackDay,
+      }) async {
     final fixture = _asMap(item['fixture']);
     final league = _asMap(item['league']);
     final teams = _asMap(item['teams']);
@@ -611,6 +841,10 @@ class FootballApiService {
     final cached = _fixtureTeamsByIdCache[fixtureId];
     if (cached != null) return cached;
 
+    if (_isApiFootballDailyLimitBlocked()) {
+      return null;
+    }
+
     try {
       final uri = Uri.parse('${ApiConfig.footballBaseUrl}/fixtures?id=$fixtureId');
       final response = await _client.get(
@@ -624,6 +858,9 @@ class FootballApiService {
 
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) return null;
+      if (_markApiFootballDailyLimitIfNeeded(decoded, context: 'fixture teams $fixtureId')) {
+        return null;
+      }
 
       final rawResponse = decoded['response'];
       if (rawResponse is! List || rawResponse.isEmpty) return null;
@@ -796,12 +1033,21 @@ class FootballApiService {
 
     if (bookmakers.isEmpty) return null;
 
+    // Wunsch-Bookmaker zuerst. Wichtig: Nur nehmen, wenn daraus wirklich
+    // ein verwertbarer Markt gelesen werden kann. Sonst verlieren wir echte
+    // Quoten, obwohl andere Bookmaker im selben API-Payload gültig sind.
     for (final accepted in _acceptedBookmakerNames) {
       for (final bookmaker in bookmakers) {
         final name = bookmaker['name']?.toString().toLowerCase().trim() ?? '';
-        if (name.isEmpty) continue;
-        if (name.contains(accepted)) return bookmaker;
+        if (name.isEmpty || !name.contains(accepted)) continue;
+        if (_readMarkets(bookmaker).hasAnyTipMarket) return bookmaker;
       }
+    }
+
+    // Fallback: kein Fake, sondern irgendein echter Bookmaker aus API-Football,
+    // wenn er mindestens einen nutzbaren Markt enthält.
+    for (final bookmaker in bookmakers) {
+      if (_readMarkets(bookmaker).hasAnyTipMarket) return bookmaker;
     }
 
     return null;
@@ -876,9 +1122,9 @@ class FootballApiService {
   }
 
   DateTime _parseApiFootballKickoff(
-    Object? rawDate, {
-    required DateTime fallbackDay,
-  }) {
+      Object? rawDate, {
+        required DateTime fallbackDay,
+      }) {
     final text = rawDate?.toString().trim() ?? '';
     if (text.isNotEmpty) {
       final parsed = DateTime.tryParse(text);
@@ -901,6 +1147,40 @@ class FootballApiService {
         .replaceAll(RegExp(r'^_|_$'), '');
   }
 
+  bool _isApiFootballDailyLimitBlocked() {
+    if (!_apiFootballDailyLimitReached) return false;
+
+    final todayKey = _formatDate(DateTime.now());
+    if (_apiFootballDailyLimitDateKey == todayKey) return true;
+
+    _apiFootballDailyLimitReached = false;
+    _apiFootballDailyLimitDateKey = null;
+    return false;
+  }
+
+  bool _markApiFootballDailyLimitIfNeeded(
+      Map<String, dynamic> decoded, {
+        required String context,
+      }) {
+    final errors = _asMap(decoded['errors']);
+    if (errors == null || errors.isEmpty) return false;
+
+    final message = errors.values.join(' ').toLowerCase();
+    final isLimit = message.contains('request limit') ||
+        message.contains('limit for the day') ||
+        message.contains('too many requests') ||
+        message.contains('quota');
+
+    if (!isLimit) return false;
+
+    _apiFootballDailyLimitReached = true;
+    _apiFootballDailyLimitDateKey = _formatDate(DateTime.now());
+
+    // ignore: avoid_print
+    print("API-FOOTBALL DAILY LIMIT REACHED ($context): ${errors.values.join(' | ')}");
+    return true;
+  }
+
   Map<String, dynamic>? _asMap(Object? raw) {
     if (raw is Map<String, dynamic>) return raw;
     if (raw is Map) return Map<String, dynamic>.from(raw);
@@ -910,6 +1190,12 @@ class FootballApiService {
   String _formatDate(DateTime d) {
     return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
+}
+
+class _ApiLeagueRef {
+  const _ApiLeagueRef(this.id);
+
+  final int id;
 }
 
 class _FixtureTeams {
@@ -941,11 +1227,11 @@ class _OddsMarkets {
 
   bool get hasAnyTipMarket =>
       home != null ||
-      draw != null ||
-      away != null ||
-      over25 != null ||
-      under25 != null ||
-      bttsYes != null;
+          draw != null ||
+          away != null ||
+          over25 != null ||
+          under25 != null ||
+          bttsYes != null;
 }
 
 class _SelectedTip {

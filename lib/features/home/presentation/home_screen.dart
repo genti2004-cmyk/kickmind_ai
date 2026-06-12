@@ -77,14 +77,20 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => screen),
-    ).then((_) => _refresh());
+    ).then((_) {
+      if (!mounted) return;
+      _refresh();
+    });
   }
 
   void _openMatch(FootballMatch match) {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => MatchDetailScreen(match: match)),
-    ).then((_) => _refresh());
+    ).then((_) {
+      if (!mounted) return;
+      _refresh();
+    });
   }
 
   @override
@@ -235,11 +241,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 else
                   ...data.saved.take(3).map(
                         (match) => _SavedMiniCard(
-                          match: match,
-                          score: _scoreService.score(match),
-                          onTap: () => _openMatch(match),
-                        ),
-                      ),
+                      match: match,
+                      score: _scoreService.score(match),
+                      onTap: () => _openMatch(match),
+                    ),
+                  ),
               ],
             ),
           );
@@ -636,12 +642,12 @@ class _QuickActionRow extends StatelessWidget {
       children: actions
           .map(
             (action) => Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(right: action == actions.last ? 0 : 8),
-                child: action,
-              ),
-            ),
-          )
+          child: Padding(
+            padding: EdgeInsets.only(right: action == actions.last ? 0 : 8),
+            child: action,
+          ),
+        ),
+      )
           .toList(),
     );
   }

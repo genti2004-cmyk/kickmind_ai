@@ -27,13 +27,34 @@ class LiveOddsService {
   static final Map<String, List<LiveOdds>> _cache = <String, List<LiveOdds>>{};
   static final Map<String, DateTime> _cacheTime = <String, DateTime>{};
   static final Map<String, _FixtureTeams> _fixtureTeamsCache = <String, _FixtureTeams>{};
+  static bool _apiFootballDailyLimitReached = false;
+  static DateTime? _apiFootballDailyLimitReachedAt;
 
   static const Duration _cacheDuration = Duration(minutes: 20);
+
+  static const List<_LiveOddsLeagueRef> _supplementalLeagues = <_LiveOddsLeagueRef>[
+    _LiveOddsLeagueRef(1),
+    _LiveOddsLeagueRef(2),
+    _LiveOddsLeagueRef(3),
+    _LiveOddsLeagueRef(4),
+    _LiveOddsLeagueRef(10),
+    _LiveOddsLeagueRef(15),
+    _LiveOddsLeagueRef(39),
+    _LiveOddsLeagueRef(61),
+    _LiveOddsLeagueRef(78),
+    _LiveOddsLeagueRef(88),
+    _LiveOddsLeagueRef(94),
+    _LiveOddsLeagueRef(103),
+    _LiveOddsLeagueRef(113),
+    _LiveOddsLeagueRef(135),
+    _LiveOddsLeagueRef(140),
+    _LiveOddsLeagueRef(253),
+  ];
 
   Future<List<LiveOdds>> fetchLiveOdds({bool forceRefresh = false}) async {
     final normalizedToday = _dateOnly(DateTime.now());
     final safeDays = days < 1 ? 1 : days;
-    final cacheKey = '${_formatDate(normalizedToday)}_$safeDays';
+    final cacheKey = 'v3_${_formatDate(normalizedToday)}_$safeDays';
     final now = DateTime.now();
     final rangeEnd = normalizedToday.add(Duration(days: safeDays - 1));
     final rangeText = '${_formatDate(normalizedToday)} bis ${_formatDate(rangeEnd)}';
@@ -82,6 +103,25 @@ class LiveOddsService {
       }
     }
 
+    if (_shouldSkipApiFootball('live odds $rangeText')) {
+      lastDiagnostics = LiveOddsFetchDiagnostics(
+        checkedAt: now,
+        checkedDateRange: rangeText,
+        requestedDays: safeDays,
+        checkedDatesCount: 0,
+        foundOddsDate: null,
+        hasApiKey: true,
+        usedCache: false,
+        forceRefresh: forceRefresh,
+        httpStatusCode: 429,
+        rawResponseCount: 0,
+        parsedOddsCount: 0,
+        visibleOddsCount: 0,
+        message: 'API-Football Tageslimit erreicht. Live-Quoten-Abruf wurde übersprungen.',
+      );
+      return <LiveOdds>[];
+    }
+
     var rawResponseCount = 0;
     var parsedOddsCount = 0;
     var checkedDatesCount = 0;
@@ -103,9 +143,21 @@ class LiveOddsService {
       }
 
       if (dayResult.odds.isNotEmpty) {
-        foundOddsDate = _formatDate(day);
+        foundOddsDate ??= _formatDate(day);
         result.addAll(dayResult.odds);
-        break;
+      }
+    }
+
+    if (result.isEmpty) {
+      final supplemental = await _fetchOddsForRangeByLeagues(
+        start: normalizedToday,
+        days: safeDays,
+      );
+      if (supplemental.isNotEmpty) {
+        foundOddsDate ??= _formatDate(normalizedToday);
+        parsedOddsCount += supplemental.length;
+        result.addAll(supplemental);
+        notes.add('League/Season-Fallback: ${supplemental.length} echte Quoten');
       }
     }
 
@@ -169,7 +221,7 @@ class LiveOddsService {
     final safeDays = days.clamp(1, 8).toInt();
     final rangeEnd = normalizedStart.add(Duration(days: safeDays - 1));
     final rangeText = '${_formatDate(normalizedStart)} bis ${_formatDate(rangeEnd)}';
-    final cacheKey = 'range_${_formatDate(normalizedStart)}_$safeDays';
+    final cacheKey = 'range_v3_${_formatDate(normalizedStart)}_$safeDays';
     final now = DateTime.now();
 
     if (!ApiConfig.hasFootballApiKey) {
@@ -217,6 +269,25 @@ class LiveOddsService {
       }
     }
 
+    if (_shouldSkipApiFootball('live odds range $rangeText')) {
+      lastDiagnostics = LiveOddsFetchDiagnostics(
+        checkedAt: now,
+        checkedDateRange: rangeText,
+        requestedDays: safeDays,
+        checkedDatesCount: 0,
+        foundOddsDate: null,
+        hasApiKey: true,
+        usedCache: false,
+        forceRefresh: forceRefresh,
+        httpStatusCode: 429,
+        rawResponseCount: 0,
+        parsedOddsCount: 0,
+        visibleOddsCount: 0,
+        message: 'API-Football Tageslimit erreicht. Top-Tips-Quoten-Abruf wurde übersprungen.',
+      );
+      return <LiveOdds>[];
+    }
+
     var rawResponseCount = 0;
     var parsedOddsCount = 0;
     var checkedDatesCount = 0;
@@ -240,6 +311,19 @@ class LiveOddsService {
       if (dayResult.odds.isNotEmpty) {
         firstOddsDate ??= _formatDate(day);
         result.addAll(dayResult.odds);
+      }
+    }
+
+    if (result.isEmpty) {
+      final supplemental = await _fetchOddsForRangeByLeagues(
+        start: normalizedStart,
+        days: safeDays,
+      );
+      if (supplemental.isNotEmpty) {
+        firstOddsDate ??= _formatDate(normalizedStart);
+        parsedOddsCount += supplemental.length;
+        result.addAll(supplemental);
+        notes.add('League/Season-Fallback: ${supplemental.length} echte Quoten');
       }
     }
 
@@ -332,72 +416,190 @@ class LiveOddsService {
   }
 
   Future<_OddsDateFetchResult> _fetchOddsForDateDetailed(DateTime date) async {
-    final uri = Uri.parse(
-      '${ApiConfig.footballBaseUrl}/odds?date=${_formatDate(date)}',
-    );
-
-    try {
-      final response = await _client.get(
-        uri,
-        headers: <String, String>{
-          'x-apisports-key': ApiConfig.footballApiKey,
-        },
-      ).timeout(const Duration(seconds: 14));
-
-      if (response.statusCode != 200) {
-        return _OddsDateFetchResult(
-          odds: const <LiveOdds>[],
-          statusCode: response.statusCode,
-          rawResponseCount: 0,
-          message: 'HTTP ${response.statusCode}',
-        );
-      }
-
-      final decoded = jsonDecode(response.body);
-      if (decoded is! Map<String, dynamic>) {
-        return const _OddsDateFetchResult(
-          odds: <LiveOdds>[],
-          statusCode: 200,
-          rawResponseCount: 0,
-          message: 'Antwort ist kein JSON-Objekt',
-        );
-      }
-
-      final rawResponse = decoded['response'];
-      if (rawResponse is! List || rawResponse.isEmpty) {
-        return const _OddsDateFetchResult(
-          odds: <LiveOdds>[],
-          statusCode: 200,
-          rawResponseCount: 0,
-          message: 'response leer',
-        );
-      }
-
-      final list = <LiveOdds>[];
-      for (final item in rawResponse) {
-        if (item is! Map<String, dynamic>) continue;
-        final parsed = await _parseFixtureOdds(item);
-        if (parsed != null) list.add(parsed);
-      }
-
-      final message = list.isEmpty
-          ? '${rawResponse.length} Roh-Datensätze, 0 vollständige 1/X/2-Quoten'
-          : '${rawResponse.length} Roh-Datensätze, ${list.length} verwendbar';
-
-      return _OddsDateFetchResult(
-        odds: list,
-        statusCode: 200,
-        rawResponseCount: rawResponse.length,
-        message: message,
-      );
-    } catch (error) {
-      return _OddsDateFetchResult(
-        odds: const <LiveOdds>[],
-        statusCode: null,
+    if (_shouldSkipApiFootball('odds ${_formatDate(date)}')) {
+      return const _OddsDateFetchResult(
+        odds: <LiveOdds>[],
+        statusCode: 429,
         rawResponseCount: 0,
-        message: 'Fehler: ${error.runtimeType}',
+        message: 'API-Football Tageslimit erreicht – Abruf übersprungen.',
       );
     }
+
+    final list = <LiveOdds>[];
+    var rawResponseCount = 0;
+    int? lastStatusCode;
+    final messages = <String>[];
+
+    for (var page = 1; page <= 20; page++) {
+      final uri = Uri.parse(
+        '${ApiConfig.footballBaseUrl}/odds?date=${_formatDate(date)}&page=$page',
+      );
+
+      try {
+        final response = await _client.get(
+          uri,
+          headers: <String, String>{
+            'x-apisports-key': ApiConfig.footballApiKey,
+          },
+        ).timeout(const Duration(seconds: 14));
+
+        lastStatusCode = response.statusCode;
+        if (response.statusCode != 200) {
+          messages.add('HTTP ${response.statusCode} auf Seite $page');
+          break;
+        }
+
+        final decoded = jsonDecode(response.body);
+        if (decoded is! Map<String, dynamic>) {
+          messages.add('Seite $page: Antwort ist kein JSON-Objekt');
+          break;
+        }
+
+        if (_hasApiFootballDailyLimitError(decoded)) {
+          _markApiFootballDailyLimitReached('live odds ${_formatDate(date)} Seite $page');
+          return _OddsDateFetchResult(
+            odds: const <LiveOdds>[],
+            statusCode: response.statusCode,
+            rawResponseCount: rawResponseCount,
+            message: 'API-Football Tageslimit erreicht – weitere Live-Quoten-Abrufe gestoppt.',
+          );
+        }
+
+        final rawResponse = decoded['response'];
+        if (rawResponse is! List || rawResponse.isEmpty) {
+          if (page == 1) messages.add('response leer');
+          break;
+        }
+
+        rawResponseCount += rawResponse.length;
+        var parsedOnPage = 0;
+        for (final item in rawResponse) {
+          final map = _asMap(item);
+          if (map == null) continue;
+          final parsed = await _parseFixtureOdds(map);
+          if (parsed != null) {
+            list.add(parsed);
+            parsedOnPage++;
+          }
+        }
+
+        messages.add('Seite $page: ${rawResponse.length} roh, $parsedOnPage verwendbar');
+
+        final paging = _asMap(decoded['paging']);
+        final current = int.tryParse(paging?['current']?.toString() ?? '') ?? page;
+        final total = int.tryParse(paging?['total']?.toString() ?? '') ?? page;
+        if (current >= total) break;
+      } catch (error) {
+        messages.add('Seite $page Fehler: ${error.runtimeType}');
+        break;
+      }
+    }
+
+    final message = list.isEmpty
+        ? (messages.isEmpty ? '0 Roh-Datensätze' : messages.take(3).join(' · '))
+        : '${rawResponseCount} Roh-Datensätze, ${list.length} verwendbar (${messages.take(3).join(' · ')})';
+
+    // ignore: avoid_print
+    print('LIVE ODDS ${_formatDate(date)}: $message');
+
+    return _OddsDateFetchResult(
+      odds: list,
+      statusCode: lastStatusCode,
+      rawResponseCount: rawResponseCount,
+      message: message,
+    );
+  }
+
+  Future<List<LiveOdds>> _fetchOddsForRangeByLeagues({
+    required DateTime start,
+    required int days,
+  }) async {
+    final fromText = _formatDate(start);
+    final toText = _formatDate(start.add(Duration(days: days - 1)));
+
+    if (_shouldSkipApiFootball('odds league supplement $fromText-$toText')) {
+      // ignore: avoid_print
+      print('LIVE ODDS LEAGUE SUPPLEMENT $fromText-$toText: 0 (API-Football Tageslimit)');
+      return <LiveOdds>[];
+    }
+
+    final result = <LiveOdds>[];
+    final seasons = _seasonCandidates(start);
+
+    for (final league in _supplementalLeagues) {
+      for (final season in seasons) {
+        if (result.length >= 80) break;
+
+        for (var page = 1; page <= 4; page++) {
+          try {
+            final uri = Uri.parse(
+              '${ApiConfig.footballBaseUrl}/odds?league=${league.id}&season=$season&page=$page',
+            );
+            final response = await _client.get(
+              uri,
+              headers: <String, String>{
+                'x-apisports-key': ApiConfig.footballApiKey,
+              },
+            ).timeout(const Duration(seconds: 12));
+
+            if (response.statusCode != 200) break;
+
+            final decoded = jsonDecode(response.body);
+            if (decoded is! Map<String, dynamic>) break;
+
+            if (_hasApiFootballDailyLimitError(decoded)) {
+              _markApiFootballDailyLimitReached('live odds league supplement $fromText-$toText');
+              final unique = <String, LiveOdds>{};
+              for (final odds in result) {
+                unique[odds.matchId] = odds;
+              }
+              final sorted = unique.values.toList()
+                ..sort((a, b) => '${a.homeTeam} ${a.awayTeam}'.compareTo('${b.homeTeam} ${b.awayTeam}'));
+              // ignore: avoid_print
+              print('LIVE ODDS LEAGUE SUPPLEMENT $fromText-$toText: ${sorted.length} (API-Football Tageslimit)');
+              return sorted;
+            }
+
+            final rawResponse = decoded['response'];
+            if (rawResponse is! List || rawResponse.isEmpty) break;
+
+            for (final raw in rawResponse) {
+              final map = _asMap(raw);
+              if (map == null) continue;
+              final parsed = await _parseFixtureOdds(map);
+              if (parsed != null) {
+                result.add(parsed);
+              }
+            }
+
+            final paging = _asMap(decoded['paging']);
+            final current = int.tryParse(paging?['current']?.toString() ?? '') ?? page;
+            final total = int.tryParse(paging?['total']?.toString() ?? '') ?? page;
+            if (current >= total) break;
+          } catch (_) {
+            break;
+          }
+        }
+      }
+    }
+
+    final unique = <String, LiveOdds>{};
+    for (final odds in result) {
+      unique[odds.matchId] = odds;
+    }
+
+    final sorted = unique.values.toList()
+      ..sort((a, b) => '${a.homeTeam} ${a.awayTeam}'.compareTo('${b.homeTeam} ${b.awayTeam}'));
+    // ignore: avoid_print
+    print('LIVE ODDS LEAGUE SUPPLEMENT $fromText-$toText: ${sorted.length}');
+    return sorted;
+  }
+
+
+  List<int> _seasonCandidates(DateTime start) {
+    final seasons = <int>{start.year, start.year - 1};
+    if (start.month >= 7) seasons.add(start.year + 1);
+    return seasons.toList()..sort((a, b) => b.compareTo(a));
   }
 
   Future<LiveOdds?> _parseFixtureOdds(Map<String, dynamic> raw) async {
@@ -407,10 +609,68 @@ class LiveOddsService {
       return null;
     }
 
-    final selectedBookmaker = _selectBookmaker(bookmakersRaw);
-    if (selectedBookmaker == null) return null;
+    final bookmakers = _orderedBookmakers(bookmakersRaw);
+    if (bookmakers.isEmpty) return null;
 
-    final betsRaw = selectedBookmaker['bets'];
+    final fixtureId = fixture['id']?.toString() ?? '';
+    if (fixtureId.isEmpty) return null;
+
+    final teamsFromOdds = _readTeamsFromOddsPayload(raw);
+    final teams = teamsFromOdds ?? await _fetchFixtureTeams(fixtureId);
+    final homeTeam = teams?.home.trim().isNotEmpty == true ? teams!.home.trim() : 'Heimteam $fixtureId';
+    final awayTeam = teams?.away.trim().isNotEmpty == true ? teams!.away.trim() : 'Auswärtsteam $fixtureId';
+
+    for (final selectedBookmaker in bookmakers) {
+      final parsed = _parseMarketsForBookmaker(selectedBookmaker);
+      if (parsed == null) continue;
+
+      return LiveOdds(
+        matchId: fixtureId,
+        homeTeam: homeTeam,
+        awayTeam: awayTeam,
+        homeWin: parsed.home,
+        draw: parsed.draw,
+        awayWin: parsed.away,
+        over25: parsed.over25,
+        under25: parsed.under25,
+        bttsYes: parsed.bttsYes,
+        bookmaker: selectedBookmaker['name']?.toString() ?? 'Bookmaker',
+        updatedAt: DateTime.tryParse(raw['update']?.toString() ?? '') ?? DateTime.now(),
+      );
+    }
+
+    return null;
+  }
+
+  List<Map<String, dynamic>> _orderedBookmakers(List<dynamic> bookmakersRaw) {
+    final bookmakers = bookmakersRaw
+        .map(_asMap)
+        .whereType<Map<String, dynamic>>()
+        .where((bookmaker) => bookmaker['bets'] is List)
+        .toList();
+
+    if (bookmakers.isEmpty) return <Map<String, dynamic>>[];
+
+    final ordered = <Map<String, dynamic>>[];
+    for (final preferred in bookmakerPriority) {
+      final preferredLower = preferred.toLowerCase();
+      for (final bookmaker in bookmakers) {
+        final name = bookmaker['name']?.toString().toLowerCase() ?? '';
+        if (name.contains(preferredLower) && !ordered.contains(bookmaker)) {
+          ordered.add(bookmaker);
+        }
+      }
+    }
+
+    for (final bookmaker in bookmakers) {
+      if (!ordered.contains(bookmaker)) ordered.add(bookmaker);
+    }
+
+    return ordered;
+  }
+
+  _ParsedLiveMarkets? _parseMarketsForBookmaker(Map<String, dynamic> bookmaker) {
+    final betsRaw = bookmaker['bets'];
     if (betsRaw is! List) return null;
 
     double? home;
@@ -470,26 +730,13 @@ class LiveOddsService {
 
     if (home == null || draw == null || away == null) return null;
 
-    final fixtureId = fixture['id']?.toString() ?? '';
-    if (fixtureId.isEmpty) return null;
-
-    final teamsFromOdds = _readTeamsFromOddsPayload(raw);
-    final teams = teamsFromOdds ?? await _fetchFixtureTeams(fixtureId);
-    final homeTeam = teams?.home.trim().isNotEmpty == true ? teams!.home.trim() : 'Heimteam $fixtureId';
-    final awayTeam = teams?.away.trim().isNotEmpty == true ? teams!.away.trim() : 'Auswärtsteam $fixtureId';
-
-    return LiveOdds(
-      matchId: fixtureId,
-      homeTeam: homeTeam,
-      awayTeam: awayTeam,
-      homeWin: home,
+    return _ParsedLiveMarkets(
+      home: home,
       draw: draw,
-      awayWin: away,
+      away: away,
       over25: over25,
       under25: under25,
       bttsYes: bttsYes,
-      bookmaker: selectedBookmaker['name']?.toString() ?? 'Bookmaker',
-      updatedAt: DateTime.tryParse(raw['update']?.toString() ?? '') ?? DateTime.now(),
     );
   }
 
@@ -507,6 +754,8 @@ class LiveOddsService {
     final cached = _fixtureTeamsCache[fixtureId];
     if (cached != null) return cached;
 
+    if (_shouldSkipApiFootball('fixture teams $fixtureId')) return null;
+
     final uri = Uri.parse('${ApiConfig.footballBaseUrl}/fixtures?id=$fixtureId');
 
     try {
@@ -521,6 +770,11 @@ class LiveOddsService {
 
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) return null;
+
+      if (_hasApiFootballDailyLimitError(decoded)) {
+        _markApiFootballDailyLimitReached('fixture teams $fixtureId');
+        return null;
+      }
 
       final rawResponse = decoded['response'];
       if (rawResponse is! List || rawResponse.isEmpty) return null;
@@ -542,24 +796,41 @@ class LiveOddsService {
     }
   }
 
-  Map<String, dynamic>? _selectBookmaker(List<dynamic> bookmakersRaw) {
-    final bookmakers = bookmakersRaw
-        .map(_asMap)
-        .whereType<Map<String, dynamic>>()
-        .where((bookmaker) => bookmaker['bets'] is List)
-        .toList();
+  bool _shouldSkipApiFootball(String context) {
+    if (!_apiFootballDailyLimitReached) return false;
 
-    if (bookmakers.isEmpty) return null;
-
-    for (final preferred in bookmakerPriority) {
-      final preferredLower = preferred.toLowerCase();
-      for (final bookmaker in bookmakers) {
-        final name = bookmaker['name']?.toString().toLowerCase() ?? '';
-        if (name.contains(preferredLower)) return bookmaker;
-      }
+    final reachedAt = _apiFootballDailyLimitReachedAt;
+    if (reachedAt == null || !_isSameDate(reachedAt, DateTime.now())) {
+      _apiFootballDailyLimitReached = false;
+      _apiFootballDailyLimitReachedAt = null;
+      return false;
     }
 
-    return bookmakers.first;
+    // ignore: avoid_print
+    print('API-FOOTBALL LIMIT SKIP live odds $context');
+    return true;
+  }
+
+  void _markApiFootballDailyLimitReached(String context) {
+    _apiFootballDailyLimitReached = true;
+    _apiFootballDailyLimitReachedAt = DateTime.now();
+    // ignore: avoid_print
+    print('API-FOOTBALL DAILY LIMIT REACHED live odds ($context)');
+  }
+
+  bool _hasApiFootballDailyLimitError(Map<String, dynamic> decoded) {
+    final errors = decoded['errors'];
+    if (errors == null) return false;
+
+    final text = errors.toString().toLowerCase();
+    return text.contains('request limit') ||
+        text.contains('reached the request limit') ||
+        text.contains('daily limit') ||
+        text.contains('rate limit');
+  }
+
+  bool _isSameDate(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   bool _isMatchWinnerBet(String name) {
@@ -622,6 +893,12 @@ class LiveOddsService {
   }
 }
 
+class _LiveOddsLeagueRef {
+  const _LiveOddsLeagueRef(this.id);
+
+  final int id;
+}
+
 class LiveOddsFetchDiagnostics {
   const LiveOddsFetchDiagnostics({
     required this.checkedAt,
@@ -679,6 +956,24 @@ class LiveOddsFetchDiagnostics {
   }
 }
 
+class _ParsedLiveMarkets {
+  const _ParsedLiveMarkets({
+    required this.home,
+    required this.draw,
+    required this.away,
+    this.over25,
+    this.under25,
+    this.bttsYes,
+  });
+
+  final double home;
+  final double draw;
+  final double away;
+  final double? over25;
+  final double? under25;
+  final double? bttsYes;
+}
+
 class _OddsDateFetchResult {
   const _OddsDateFetchResult({
     required this.odds,
@@ -702,3 +997,4 @@ class _FixtureTeams {
   final String home;
   final String away;
 }
+
