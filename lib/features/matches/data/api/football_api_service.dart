@@ -67,6 +67,26 @@ class FootballApiService {
     _ApiLeagueRef(128),
   ];
 
+  static const List<_EspnSoccerLeagueRef> _espnSoccerLeagues = <_EspnSoccerLeagueRef>[
+    _EspnSoccerLeagueRef('fifa.world', 'FIFA World Cup'),
+    _EspnSoccerLeagueRef('uefa.champions', 'UEFA Champions League'),
+    _EspnSoccerLeagueRef('uefa.europa', 'UEFA Europa League'),
+    _EspnSoccerLeagueRef('uefa.europa.conf', 'UEFA Conference League'),
+    _EspnSoccerLeagueRef('eng.1', 'Premier League'),
+    _EspnSoccerLeagueRef('eng.2', 'Championship'),
+    _EspnSoccerLeagueRef('esp.1', 'LaLiga'),
+    _EspnSoccerLeagueRef('ger.1', 'Bundesliga'),
+    _EspnSoccerLeagueRef('ita.1', 'Serie A'),
+    _EspnSoccerLeagueRef('fra.1', 'Ligue 1'),
+    _EspnSoccerLeagueRef('ned.1', 'Eredivisie'),
+    _EspnSoccerLeagueRef('por.1', 'Liga Portugal'),
+    _EspnSoccerLeagueRef('tur.1', 'Super Lig'),
+    _EspnSoccerLeagueRef('usa.1', 'MLS'),
+    _EspnSoccerLeagueRef('mex.1', 'Liga MX'),
+    _EspnSoccerLeagueRef('bra.1', 'Brasileirao'),
+    _EspnSoccerLeagueRef('arg.1', 'Argentine Primera'),
+  ];
+
   static const List<String> _acceptedBookmakerNames = <String>[
     'betano',
     'bet365',
@@ -172,6 +192,17 @@ class FootballApiService {
         final dayFixtures = await _fetchDayFromSportsDb(day);
         fixtureMatches.addAll(dayFixtures);
       }
+    }
+
+    // Zweite echte Zusatzquelle: ESPN Soccer Scoreboard. Wichtig: nicht der
+    // allgemeine Soccer-Endpunkt, sondern konkrete Liga-Codes. So finden wir
+    // auch Turniere wie FIFA World Cup über fifa.world. Keine Dummy-Spiele.
+    if (fixtureMatches.length < minimumFixtureTarget) {
+      final espnMatches = await _fetchEspnSoccerSupplement(
+        start: normalizedStart,
+        days: safeDays,
+      );
+      fixtureMatches.addAll(espnMatches);
     }
 
     // Odds werden ebenfalls nur echt ergänzt: zuerst Datum, danach League/Season.
@@ -587,6 +618,168 @@ class FootballApiService {
       print('SPORTSDB ERROR ${_formatDate(day)}: $error');
       return <FootballMatch>[];
     }
+  }
+
+  Future<List<FootballMatch>> _fetchEspnSoccerSupplement({
+    required DateTime start,
+    required int days,
+  }) async {
+    final result = <FootballMatch>[];
+    final fromText = _formatDate(start);
+    final toText = _formatDate(start.add(Duration(days: days - 1)));
+
+    for (var offset = 0; offset < days; offset++) {
+      final day = DateTime(start.year, start.month, start.day).add(Duration(days: offset));
+      for (final league in _espnSoccerLeagues) {
+        try {
+          final dayMatches = await _fetchEspnSoccerLeagueDay(
+            day: day,
+            league: league,
+          );
+          result.addAll(dayMatches);
+        } catch (_) {
+          // Einzelne ESPN-Ligen dürfen den gesamten echten Fallback nicht blockieren.
+        }
+      }
+    }
+
+    final sorted = _dedupeAndSort(result)
+        .where((match) => _isInsideRange(match.kickoff, start, days))
+        .take(220)
+        .toList();
+
+    // ignore: avoid_print
+    print('ESPN SOCCER SUPPLEMENT $fromText-$toText: ${sorted.length}');
+    return sorted;
+  }
+
+  Future<List<FootballMatch>> _fetchEspnSoccerLeagueDay({
+    required DateTime day,
+    required _EspnSoccerLeagueRef league,
+  }) async {
+    final result = <FootballMatch>[];
+    final uri = Uri.https(
+      'site.api.espn.com',
+      '/apis/site/v2/sports/soccer/${league.code}/scoreboard',
+      <String, String>{
+        'dates': _formatEspnDate(day),
+        'limit': '200',
+      },
+    );
+
+    final response = await _client.get(uri).timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) return <FootballMatch>[];
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) return <FootballMatch>[];
+
+    final events = decoded['events'];
+    if (events is! List || events.isEmpty) return <FootballMatch>[];
+
+    for (final raw in events) {
+      final event = _asMap(raw);
+      if (event == null) continue;
+      final match = _buildEspnMatch(event, fallbackDay: day, fallbackLeague: league.name);
+      if (match != null) result.add(match);
+    }
+
+    return _dedupeAndSort(result);
+  }
+
+  FootballMatch? _buildEspnMatch(
+      Map<String, dynamic> event, {
+        required DateTime fallbackDay,
+        required String fallbackLeague,
+      }) {
+    final eventId = _clean(event['id']);
+    final competitions = event['competitions'];
+    if (competitions is! List || competitions.isEmpty) return null;
+
+    final competition = _asMap(competitions.first);
+    if (competition == null) return null;
+
+    final competitors = competition['competitors'];
+    if (competitors is! List || competitors.length < 2) return null;
+
+    String? home;
+    String? away;
+
+    for (final rawCompetitor in competitors) {
+      final competitor = _asMap(rawCompetitor);
+      if (competitor == null) continue;
+      final team = _asMap(competitor['team']);
+      final name = _clean(team?['displayName']) ??
+          _clean(team?['shortDisplayName']) ??
+          _clean(team?['name']);
+      if (name == null) continue;
+
+      final homeAway = _clean(competitor['homeAway'])?.toLowerCase();
+      if (homeAway == 'home') {
+        home = name;
+      } else if (homeAway == 'away') {
+        away = name;
+      }
+    }
+
+    // Sicherheitsfallback, falls ESPN bei neutralen Spielen homeAway anders setzt.
+    if (home == null || away == null) {
+      final first = _asMap(competitors[0]);
+      final second = _asMap(competitors[1]);
+      home ??= _clean(_asMap(first?['team'])?['displayName']) ??
+          _clean(_asMap(first?['team'])?['shortDisplayName']) ??
+          _clean(_asMap(first?['team'])?['name']);
+      away ??= _clean(_asMap(second?['team'])?['displayName']) ??
+          _clean(_asMap(second?['team'])?['shortDisplayName']) ??
+          _clean(_asMap(second?['team'])?['name']);
+    }
+
+    if (home == null || away == null || home.trim().isEmpty || away.trim().isEmpty) {
+      return null;
+    }
+
+    final kickoff = _parseEspnKickoff(event['date'], fallbackDay: fallbackDay);
+    final leagueName = _clean(_asMap(event['league'])?['name']) ?? fallbackLeague;
+    final id = eventId == null || eventId.isEmpty
+        ? 'espn_${_normalizeTeamName(home)}_${_normalizeTeamName(away)}_${_formatDate(kickoff)}'
+        : 'espn_$eventId';
+
+    final match = _predictionEngine.buildMatch(
+      id: id,
+      fixtureId: null,
+      season: kickoff.year,
+      league: leagueName,
+      home: home,
+      away: away,
+      kickoff: kickoff,
+      tipType: TipType.homeWin,
+      odds: 0.0,
+    );
+
+    return match.copyWith(
+      hasRealOdds: false,
+      realOddsBookmaker: null,
+      odds: 0.0,
+      shortReason: 'Echtes Spiel aus ESPN Soccer Scoreboard. Keine echte passende Betano/Bet365/Betbat/Homebet-Quote gefunden – deshalb kein echter Wett-Tipp.',
+    );
+  }
+
+  DateTime _parseEspnKickoff(
+      Object? rawDate, {
+        required DateTime fallbackDay,
+      }) {
+    final text = rawDate?.toString().trim() ?? '';
+    if (text.isNotEmpty) {
+      final parsed = DateTime.tryParse(text);
+      if (parsed != null) return parsed.toLocal();
+    }
+
+    return DateTime(fallbackDay.year, fallbackDay.month, fallbackDay.day, 12);
+  }
+
+  String _formatEspnDate(DateTime value) {
+    return '${value.year.toString().padLeft(4, '0')}'
+        '${value.month.toString().padLeft(2, '0')}'
+        '${value.day.toString().padLeft(2, '0')}';
   }
 
   DateTime _parseSportsDbKickoff(
@@ -1190,6 +1383,13 @@ class FootballApiService {
   String _formatDate(DateTime d) {
     return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
+}
+
+class _EspnSoccerLeagueRef {
+  const _EspnSoccerLeagueRef(this.code, this.name);
+
+  final String code;
+  final String name;
 }
 
 class _ApiLeagueRef {
