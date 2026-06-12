@@ -93,6 +93,104 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  List<FootballMatch> _bestDashboardMatches(_HomeDashboardData data) {
+    final pool = <FootballMatch>[
+      ...data.today,
+      ...data.tomorrow,
+      ...data.next3Days,
+    ];
+
+    final seen = <String>{};
+    final unique = <FootballMatch>[];
+    for (final match in pool) {
+      if (!_isRealTeamName(match.homeTeam) || !_isRealTeamName(match.awayTeam)) continue;
+      final key = _matchDedupeKey(match);
+      if (seen.add(key)) unique.add(match);
+    }
+
+    unique.sort(_compareByDashboardQuality);
+
+    final strong = unique.where((match) {
+      final decision = _scoreService.decision(match);
+      final score = _scoreService.score(match);
+      if (decision.type == TopTipDecisionType.noBet) return false;
+      if (_isHighRisk(match) && score.finalScore < 70) return false;
+      return score.finalScore >= 55;
+    }).toList();
+
+    if (strong.isNotEmpty) return strong.take(3).toList();
+    return unique.take(3).toList();
+  }
+
+  int _compareByDashboardQuality(FootballMatch a, FootballMatch b) {
+    final qualityCompare = _dashboardQualityScore(b).compareTo(_dashboardQualityScore(a));
+    if (qualityCompare != 0) return qualityCompare;
+    return a.kickoff.compareTo(b.kickoff);
+  }
+
+  double _dashboardQualityScore(FootballMatch match) {
+    final score = _scoreService.score(match);
+    final decision = _scoreService.decision(match);
+    final decisionBoost = switch (decision.type) {
+      TopTipDecisionType.premium => 12.0,
+      TopTipDecisionType.value => 8.0,
+      TopTipDecisionType.watch => 2.0,
+      TopTipDecisionType.noBet => -22.0,
+    };
+    final sourceBoost = match.id.startsWith('odds_') ? 8.0 : 1.5;
+    final riskBoost = _isHighRisk(match) ? -14.0 : 3.0;
+    final todayBoost = _kickoffPriorityBoost(match.kickoff);
+    return score.finalScore + decisionBoost + sourceBoost + riskBoost + todayBoost;
+  }
+
+  double _kickoffPriorityBoost(DateTime kickoff) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final matchDay = DateTime(kickoff.year, kickoff.month, kickoff.day);
+    final diff = matchDay.difference(today).inDays;
+    if (diff == 0) return 3.0;
+    if (diff == 1) return 2.0;
+    if (diff >= 2 && diff <= 3) return 1.0;
+    return 0.0;
+  }
+
+  bool _isHighRisk(FootballMatch match) {
+    final risk = match.riskLevel.toLowerCase().trim();
+    return risk == 'hoch' || risk == 'high';
+  }
+
+  bool _isRealTeamName(String value) {
+    final text = value.trim();
+    if (text.isEmpty) return false;
+    final lower = text.toLowerCase();
+    if (RegExp(r'^(heimteam|auswärtsteam|auswaertsteam)\s*\d+$').hasMatch(lower)) return false;
+    if (RegExp(r'^\d+$').hasMatch(text)) return false;
+    return true;
+  }
+
+  String _matchDedupeKey(FootballMatch match) {
+    final home = match.homeTeam.trim().toLowerCase();
+    final away = match.awayTeam.trim().toLowerCase();
+    final day = DateTime(match.kickoff.year, match.kickoff.month, match.kickoff.day);
+    return '$home|$away|${day.toIso8601String()}';
+  }
+
+  String _sourceLabel(FootballMatch match) {
+    if (match.id.startsWith('odds_')) return 'Echte Quote';
+    if (match.id.startsWith('espn_')) return 'ESPN';
+    if (match.id.startsWith('sportsdb_')) return 'TheSportsDB';
+    if (match.id.startsWith('fixture_')) return 'API-Football';
+    return 'Spielplan';
+  }
+
+  Color _sourceColor(FootballMatch match) {
+    if (match.id.startsWith('odds_')) return KickMindTheme.success;
+    if (match.id.startsWith('espn_')) return Colors.deepPurple;
+    if (match.id.startsWith('sportsdb_')) return Colors.blueGrey;
+    if (match.id.startsWith('fixture_')) return KickMindTheme.primary;
+    return Colors.blueGrey;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -129,7 +227,8 @@ class _HomeScreenState extends State<HomeScreen> {
           }
 
           final data = snapshot.data ?? const _HomeDashboardData.empty();
-          final best = data.bestMatch;
+          final bestMatches = _bestDashboardMatches(data);
+          final best = bestMatches.isNotEmpty ? bestMatches.first : null;
 
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -139,6 +238,9 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 _DashboardHero(
                   data: data,
+                  bestMatch: best,
+                  bestScore: best == null ? null : _scoreService.score(best),
+                  bestDecisionLabel: best == null ? null : _scoreService.decision(best).shortLabel,
                   onOpenTopTips: () => _openScreen(const TopTipsScreen()),
                   onOpenMatches: () => _openScreen(const KickMindMatchesScreen()),
                 ),
@@ -218,16 +320,23 @@ class _HomeScreenState extends State<HomeScreen> {
                 const _HomeSectionTitle(
                   icon: Icons.workspace_premium_rounded,
                   title: 'Beste aktuelle Auswahl',
-                  subtitle: 'Aus echten Matchdaten sortiert nach Final Score.',
+                  subtitle: 'Die besten 1–3 Signale nach KickMind Score, Risiko und Datenquelle.',
                 ),
                 const SizedBox(height: 10),
-                if (best == null)
+                if (bestMatches.isEmpty)
                   _EmptyDashboardCard(onRefresh: _refresh)
                 else
-                  _BestMatchCard(
-                    match: best,
-                    score: _scoreService.score(best),
-                    onTap: () => _openMatch(best),
+                  ...bestMatches.take(3).map(
+                        (match) => _BestMatchCard(
+                      match: match,
+                      score: _scoreService.score(match),
+                      decisionLabel: _scoreService.decision(match).shortLabel,
+                      decisionType: _scoreService.decision(match).type,
+                      rank: bestMatches.indexOf(match) + 1,
+                      sourceLabel: _sourceLabel(match),
+                      sourceColor: _sourceColor(match),
+                      onTap: () => _openMatch(match),
+                    ),
                   ),
                 const SizedBox(height: 16),
                 const _HomeSectionTitle(
@@ -289,11 +398,17 @@ class _HomeDashboardData {
 
 class _DashboardHero extends StatelessWidget {
   final _HomeDashboardData data;
+  final FootballMatch? bestMatch;
+  final TopTipScore? bestScore;
+  final String? bestDecisionLabel;
   final VoidCallback onOpenTopTips;
   final VoidCallback onOpenMatches;
 
   const _DashboardHero({
     required this.data,
+    required this.bestMatch,
+    required this.bestScore,
+    required this.bestDecisionLabel,
     required this.onOpenTopTips,
     required this.onOpenMatches,
   });
@@ -374,8 +489,32 @@ class _DashboardHero extends StatelessWidget {
               _HeroPill(text: '${data.tomorrow.length} Morgen'),
               _HeroPill(text: '${data.next3Days.length} 3 Tage'),
               _HeroPill(text: '${data.next7Days.length} Woche'),
+              if (bestScore != null) _HeroPill(text: 'Best ${bestScore!.finalScore.toStringAsFixed(0)}'),
+              if (bestDecisionLabel != null) _HeroPill(text: bestDecisionLabel!),
             ],
           ),
+          if (bestMatch != null) ...[
+            const SizedBox(height: 13),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.white.withOpacity(0.16)),
+              ),
+              child: Text(
+                'Top Signal: ${bestMatch!.teamsLabel}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
@@ -702,18 +841,27 @@ class _QuickAction extends StatelessWidget {
 class _BestMatchCard extends StatelessWidget {
   final FootballMatch match;
   final TopTipScore score;
+  final String decisionLabel;
+  final TopTipDecisionType decisionType;
+  final int rank;
+  final String sourceLabel;
+  final Color sourceColor;
   final VoidCallback onTap;
 
   const _BestMatchCard({
     required this.match,
     required this.score,
+    required this.decisionLabel,
+    required this.decisionType,
+    required this.rank,
+    required this.sourceLabel,
+    required this.sourceColor,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
-    final isRealOdds = match.id.startsWith('odds_');
 
     return InkWell(
       onTap: onTap,
@@ -738,8 +886,13 @@ class _BestMatchCard extends StatelessWidget {
             Row(
               children: [
                 _SmallBadge(
-                  text: isRealOdds ? 'Echte Quote' : 'Spielplan',
-                  color: isRealOdds ? KickMindTheme.success : Colors.blueGrey,
+                  text: '#$rank $decisionLabel',
+                  color: _decisionColor(decisionType),
+                ),
+                const SizedBox(width: 6),
+                _SmallBadge(
+                  text: sourceLabel,
+                  color: sourceColor,
                 ),
                 const Spacer(),
                 Text(
@@ -772,13 +925,51 @@ class _BestMatchCard extends StatelessWidget {
                 _SmallBadge(text: match.tipLabel, color: KickMindTheme.primary),
                 _SmallBadge(text: 'Final ${score.finalScore.toStringAsFixed(1)}', color: KickMindTheme.primaryDark),
                 _SmallBadge(text: 'AI ${match.aiScore}%', color: scoreColor),
+                _SmallBadge(text: 'Conf ${score.confidence.toStringAsFixed(0)}%', color: KickMindTheme.primary),
                 _SmallBadge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: Colors.indigo),
               ],
+            ),
+            const SizedBox(height: 9),
+            Text(
+              _dashboardReason(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: KickMindTheme.textMuted,
+                fontSize: 12.4,
+                height: 1.26,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ],
         ),
       ),
     );
+  }
+  String _dashboardReason() {
+    switch (decisionType) {
+      case TopTipDecisionType.premium:
+        return 'Premium-Signal: Score, Risiko und Datenquelle passen aktuell am besten zusammen.';
+      case TopTipDecisionType.value:
+        return 'Value-Signal: Bewertung und Quote/Marktlogik wirken überdurchschnittlich interessant.';
+      case TopTipDecisionType.watch:
+        return 'Beobachten: solide Analyse, aber noch kein klares Premium-Signal.';
+      case TopTipDecisionType.noBet:
+        return 'No Bet: aktuell nicht als Tipp übernehmen, nur zur Analyse öffnen.';
+    }
+  }
+
+  Color _decisionColor(TopTipDecisionType type) {
+    switch (type) {
+      case TopTipDecisionType.premium:
+        return KickMindTheme.primary;
+      case TopTipDecisionType.value:
+        return KickMindTheme.success;
+      case TopTipDecisionType.watch:
+        return KickMindTheme.primaryDark;
+      case TopTipDecisionType.noBet:
+        return KickMindTheme.danger;
+    }
   }
 }
 
