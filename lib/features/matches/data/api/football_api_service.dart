@@ -600,11 +600,10 @@ class FootballApiService {
         );
 
         result.add(
-          match.copyWith(
-            hasRealOdds: false,
-            realOddsBookmaker: null,
-            odds: 0.0,
-            shortReason: 'Echtes Spiel aus TheSportsDB-Spielplan. Keine echte passende Betano/Bet365/Betbat/Homebet-Quote gefunden – deshalb kein echter Wett-Tipp.',
+          _applyKickMindMatchScore(
+            match,
+            source: 'TheSportsDB',
+            baseReason: 'Echtes Spiel aus TheSportsDB-Spielplan. Keine echte passende Betano/Bet365/Betbat/Homebet-Quote gefunden – deshalb kein echter Wett-Tipp.',
           ),
         );
       }
@@ -755,11 +754,10 @@ class FootballApiService {
       odds: 0.0,
     );
 
-    return match.copyWith(
-      hasRealOdds: false,
-      realOddsBookmaker: null,
-      odds: 0.0,
-      shortReason: 'Echtes Spiel aus ESPN Soccer Scoreboard. Keine echte passende Betano/Bet365/Betbat/Homebet-Quote gefunden – deshalb kein echter Wett-Tipp.',
+    return _applyKickMindMatchScore(
+      match,
+      source: 'ESPN',
+      baseReason: 'Echtes Spiel aus ESPN Soccer Scoreboard. Keine echte passende Betano/Bet365/Betbat/Homebet-Quote gefunden – deshalb kein echter Wett-Tipp.',
     );
   }
 
@@ -823,6 +821,152 @@ class FootballApiService {
     final text = value?.toString().trim();
     if (text == null || text.isEmpty || text == 'null') return null;
     return text;
+  }
+
+  FootballMatch _applyKickMindMatchScore(
+      FootballMatch match, {
+        required String source,
+        required String baseReason,
+      }) {
+    final sourceScore = _sourceQualityScore(source);
+    final leagueScore = _leagueQualityScore(match.league);
+    final teamScore = _teamNameQualityScore(match.homeTeam, match.awayTeam);
+    final timeScore = _kickoffQualityScore(match.kickoff);
+    final oddsScore = match.hasPlayableOdds ? _oddsQualityScore(match.odds) : 0;
+
+    final rawScore = 42 + sourceScore + leagueScore + teamScore + timeScore + oddsScore;
+    final kickMindScore = rawScore.clamp(35, 88).toInt();
+    final risk = _riskFromKickMindScore(kickMindScore, hasOdds: match.hasPlayableOdds);
+    final tipType = _selectFallbackTipType(match, kickMindScore);
+    final tipLabel = _tipLabelFor(tipType);
+    final reason = _buildKickMindScoreReason(
+      baseReason: baseReason,
+      source: source,
+      score: kickMindScore,
+      leagueScore: leagueScore,
+      teamScore: teamScore,
+      timeScore: timeScore,
+      hasOdds: match.hasPlayableOdds,
+    );
+
+    return match.copyWith(
+      tipType: tipType,
+      tipLabel: tipLabel,
+      aiScore: kickMindScore,
+      riskLevel: risk,
+      odds: match.hasPlayableOdds ? match.odds : 0.0,
+      hasRealOdds: match.hasRealOdds,
+      realOddsBookmaker: match.realOddsBookmaker,
+      shortReason: reason,
+    );
+  }
+
+  int _sourceQualityScore(String source) {
+    final normalized = source.toLowerCase();
+    if (normalized.contains('api-football')) return 13;
+    if (normalized.contains('espn')) return 11;
+    if (normalized.contains('sportsdb')) return 8;
+    return 6;
+  }
+
+  int _leagueQualityScore(String league) {
+    final text = league.toLowerCase();
+    if (text.contains('world cup') || text.contains('champions league')) return 13;
+    if (text.contains('premier league') || text.contains('laliga') || text.contains('bundesliga')) return 12;
+    if (text.contains('serie a') || text.contains('ligue 1') || text.contains('europa league')) return 11;
+    if (text.contains('eredivisie') || text.contains('liga portugal') || text.contains('mls')) return 8;
+    if (text.contains('championship') || text.contains('super lig') || text.contains('liga mx')) return 7;
+    if (text.trim().isEmpty || text == 'soccer') return 3;
+    return 5;
+  }
+
+  int _teamNameQualityScore(String home, String away) {
+    final h = _normalizeTeamName(home);
+    final a = _normalizeTeamName(away);
+    if (h.isEmpty || a.isEmpty || h == a) return 0;
+    if (h.startsWith('heimteam') || a.startsWith('auswartsteam') || a.startsWith('auswärtsteam')) return 0;
+    var score = 5;
+    if (h.length >= 4 && a.length >= 4) score += 3;
+    if (h.length >= 8 && a.length >= 8) score += 2;
+    return score.clamp(0, 10).toInt();
+  }
+
+  int _kickoffQualityScore(DateTime kickoff) {
+    final now = DateTime.now();
+    final diffHours = kickoff.difference(now).inHours;
+    if (diffHours >= 0 && diffHours <= 36) return 7;
+    if (diffHours > 36 && diffHours <= 96) return 6;
+    if (diffHours > 96 && diffHours <= 168) return 5;
+    if (diffHours < 0 && diffHours >= -8) return 3;
+    return 1;
+  }
+
+  int _oddsQualityScore(double odds) {
+    if (odds < 1.18 || odds > 4.80) return 0;
+    if (odds >= 1.55 && odds <= 2.25) return 9;
+    if (odds >= 1.35 && odds <= 2.80) return 6;
+    return 3;
+  }
+
+  String _riskFromKickMindScore(int score, {required bool hasOdds}) {
+    if (!hasOdds) {
+      if (score >= 72) return 'Mittel';
+      return 'Beobachten';
+    }
+    if (score >= 76) return 'Niedrig';
+    if (score >= 62) return 'Mittel';
+    return 'Hoch';
+  }
+
+  TipType _selectFallbackTipType(FootballMatch match, int score) {
+    if (match.hasPlayableOdds) return match.tipType;
+
+    final league = match.league.toLowerCase();
+    final home = _normalizeTeamName(match.homeTeam);
+    final away = _normalizeTeamName(match.awayTeam);
+    final homeBias = (home.length - away.length).abs();
+
+    if (league.contains('world cup') || league.contains('champions') || league.contains('premier')) {
+      return TipType.over25;
+    }
+    if (score >= 70 && homeBias <= 3) return TipType.btts;
+    if (score >= 64) return TipType.over25;
+    return TipType.homeWin;
+  }
+
+  String _tipLabelFor(TipType type) {
+    switch (type) {
+      case TipType.homeWin:
+        return '1';
+      case TipType.draw:
+        return 'X';
+      case TipType.awayWin:
+        return '2';
+      case TipType.over25:
+        return 'Ü2.5';
+      case TipType.under25:
+        return 'U2.5';
+      case TipType.btts:
+        return 'BTTS';
+    }
+  }
+
+  String _buildKickMindScoreReason({
+    required String baseReason,
+    required String source,
+    required int score,
+    required int leagueScore,
+    required int teamScore,
+    required int timeScore,
+    required bool hasOdds,
+  }) {
+    final label = score >= 74
+        ? 'Top-Kandidat'
+        : score >= 64
+        ? 'Solide Analyse'
+        : 'Beobachten';
+    final oddsText = hasOdds ? 'Quote vorhanden' : 'ohne echte Quote';
+    return '$baseReason · KickMind Score $score/100: $label ($source, Liga +$leagueScore, Teams +$teamScore, Termin +$timeScore, $oddsText).';
   }
 
   _OddsSnapshot? _findOddsByTeams(FootballMatch match, Iterable<_OddsSnapshot> oddsList) {
@@ -894,11 +1038,10 @@ class FootballApiService {
       odds: 0.0,
     );
 
-    return match.copyWith(
-      hasRealOdds: false,
-      realOddsBookmaker: null,
-      odds: 0.0,
-      shortReason: 'Echtes Spiel aus API-Football. Für dieses Spiel wurde aktuell keine passende Betano/Bet365/Betbat/Homebet-Quote gefunden – deshalb kein echter Wett-Tipp.',
+    return _applyKickMindMatchScore(
+      match,
+      source: 'API-Football',
+      baseReason: 'Echtes Spiel aus API-Football. Für dieses Spiel wurde aktuell keine passende Betano/Bet365/Betbat/Homebet-Quote gefunden – deshalb kein echter Wett-Tipp.',
     );
   }
 
