@@ -319,23 +319,40 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
 
           final ranked = matches..sort(_compareByTopTipQuality);
 
-          final recommended = ranked.where(_isDisplayRecommendedTip).toList();
-          final visibleTopTips = recommended.isNotEmpty
-              ? recommended.take(8).toList()
-              : ranked.where((match) => _finalScore(match) >= 50).take(8).toList();
-          final safeVisibleTopTips = visibleTopTips.isNotEmpty
-              ? visibleTopTips
-              : ranked.take(5).toList();
+          final premiumCandidates = ranked.where(_isSmartTopTipCandidate).toList();
+          final fallbackCandidates = ranked
+              .where((match) => !premiumCandidates.contains(match))
+              .where(_isDisplayRecommendedTip)
+              .toList();
+
+          final safeVisibleTopTips = <FootballMatch>[
+            ...premiumCandidates.take(5),
+          ];
+
+          if (safeVisibleTopTips.length < 3) {
+            for (final match in fallbackCandidates) {
+              if (safeVisibleTopTips.contains(match)) continue;
+              safeVisibleTopTips.add(match);
+              if (safeVisibleTopTips.length >= 3) break;
+            }
+          }
+
+          if (safeVisibleTopTips.isEmpty) {
+            safeVisibleTopTips.addAll(ranked.take(3));
+          }
 
           final valueBets = ranked
+              .where((match) => !safeVisibleTopTips.contains(match))
               .where((match) => _isValueBet(match) && _hasUsableOdds(match))
               .take(4)
               .toList();
           final watchList = ranked
               .where((match) => !safeVisibleTopTips.contains(match))
-              .where((match) => _finalScore(match) >= 58)
-              .take(6)
+              .where((match) => !valueBets.contains(match))
+              .where(_isSmartWatchCandidate)
+              .take(7)
               .toList();
+          final noBetCount = ranked.where(_isNoBetCandidate).length;
 
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -352,8 +369,9 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                   rangeLabel: _range.label,
                   matchesCount: matches.length,
                   realOddsCount: matches.where(_hasRealBookmakerOdds).length,
-                  recommendedCount: recommended.length,
+                  recommendedCount: safeVisibleTopTips.length,
                   valueCount: valueBets.length,
+                  noBetCount: noBetCount,
                   bestScore: _finalScore(ranked.first),
                   bestAiScore: ranked.first.aiScore,
                 ),
@@ -361,7 +379,7 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                 const _SectionTitle(
                   icon: Icons.auto_awesome_rounded,
                   title: 'Beste Auswahl',
-                  subtitle: 'Sortiert nach echter Quote, Final Score, Value, Risiko und Spielnähe.',
+                  subtitle: 'Nur die stärksten 3–5 Signale. Schwächere Spiele wandern in Beobachten oder No Bet.',
                 ),
                 const SizedBox(height: 12),
                 ...safeVisibleTopTips.take(8).map(
@@ -453,6 +471,38 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     return score.isRecommended || score.isValueBet || score.finalScore >= 60;
   }
 
+  bool _isSmartTopTipCandidate(FootballMatch match) {
+    final score = _scoreService.score(match);
+    if (_isHighRisk(match) && score.finalScore < 76) return false;
+    if (!_isRealTeamName(match.homeTeam) || !_isRealTeamName(match.awayTeam)) return false;
+
+    final hasRealOdds = _hasRealBookmakerOdds(match);
+    final hasUsableOdds = _hasUsableOdds(match);
+
+    if (hasRealOdds && hasUsableOdds) {
+      return score.finalScore >= 62 || score.isValueBet || score.isRecommended;
+    }
+
+    // Spielplan-Tipps ohne echte Quote dürfen sichtbar sein, aber erst ab
+    // höherer Qualität. Dadurch verkauft die App nicht jedes echte Spiel als
+    // Top-Tipp, solange API-Football keine Quoten liefert.
+    return score.finalScore >= 68 && match.aiScore >= 62;
+  }
+
+  bool _isSmartWatchCandidate(FootballMatch match) {
+    final score = _scoreService.score(match);
+    if (_isHighRisk(match) && score.finalScore < 72) return false;
+    if (!_isRealTeamName(match.homeTeam) || !_isRealTeamName(match.awayTeam)) return false;
+    return score.finalScore >= 52 || match.aiScore >= 55;
+  }
+
+  bool _isNoBetCandidate(FootballMatch match) {
+    final score = _scoreService.score(match);
+    if (_isHighRisk(match) && score.finalScore < 72) return true;
+    if (score.finalScore < 52 && match.aiScore < 55) return true;
+    return false;
+  }
+
   bool _hasRealBookmakerOdds(FootballMatch match) {
     return match.id.startsWith('odds_');
   }
@@ -522,6 +572,7 @@ class _TopTipsSummaryStrip extends StatelessWidget {
   final int realOddsCount;
   final int recommendedCount;
   final int valueCount;
+  final int noBetCount;
   final double bestScore;
   final int bestAiScore;
 
@@ -531,6 +582,7 @@ class _TopTipsSummaryStrip extends StatelessWidget {
     required this.realOddsCount,
     required this.recommendedCount,
     required this.valueCount,
+    required this.noBetCount,
     required this.bestScore,
     required this.bestAiScore,
   });
@@ -577,7 +629,7 @@ class _TopTipsSummaryStrip extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  'Bester Final ${bestScore.toStringAsFixed(1)} · AI $bestAiScore% · Quote $realOddsCount · Value $valueCount',
+                  'Top $recommendedCount · Beobachten/Value $valueCount · No Bet $noBetCount · Quote $realOddsCount',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
