@@ -155,6 +155,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                     confidence: _confidence(match),
                     statusLabel: _categoryLabel(match),
                     statusColor: _categoryColor(match),
+                    sourceLabel: _sourceLabel(match),
+                    sourceColor: _sourceColor(match),
+                    reason: _analysisReason(match),
                     onTap: () => _openDetail(match),
                   ),
                 ),
@@ -173,6 +176,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                       valueEdge: _valueEdge(match),
                       statusLabel: 'Premium',
                       statusColor: KickMindTheme.primary,
+                      sourceLabel: _sourceLabel(match),
+                      sourceColor: _sourceColor(match),
+                      reason: _analysisReason(match),
                       onTap: () => _openDetail(match),
                     ),
                   ),
@@ -192,6 +198,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                       valueEdge: _valueEdge(match),
                       statusLabel: 'Value',
                       statusColor: KickMindTheme.success,
+                      sourceLabel: _sourceLabel(match),
+                      sourceColor: _sourceColor(match),
+                      reason: _analysisReason(match),
                       onTap: () => _openDetail(match),
                     ),
                   ),
@@ -211,6 +220,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                       valueEdge: _valueEdge(match),
                       statusLabel: 'Watch',
                       statusColor: KickMindTheme.primaryDark,
+                      sourceLabel: _sourceLabel(match),
+                      sourceColor: _sourceColor(match),
+                      reason: _analysisReason(match),
                       onTap: () => _openDetail(match),
                     ),
                   ),
@@ -286,6 +298,60 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         return KickMindTheme.primaryDark;
       case TopTipDecisionType.noBet:
         return KickMindTheme.danger;
+    }
+  }
+
+  bool _hasRealBookmakerOdds(FootballMatch match) {
+    return match.id.startsWith('odds_');
+  }
+
+  String _sourceLabel(FootballMatch match) {
+    return _hasRealBookmakerOdds(match) ? 'Echte Quote' : 'Spielplan';
+  }
+
+  Color _sourceColor(FootballMatch match) {
+    return _hasRealBookmakerOdds(match) ? KickMindTheme.success : Colors.blueGrey;
+  }
+
+  String _analysisReason(FootballMatch match) {
+    final decision = _scoreService.decision(match);
+    final score = _scoreService.score(match);
+    final source = _hasRealBookmakerOdds(match) ? 'echte Bookmaker-Quote' : 'echte Spielplan-Daten';
+    final valueText = score.valueEdge >= 0
+        ? '+${score.valueEdge.toStringAsFixed(1)}%'
+        : '${score.valueEdge.toStringAsFixed(1)}%';
+
+    String tipContext;
+    switch (match.tipType) {
+      case TipType.homeWin:
+        tipContext = 'Heimsieg-Signal';
+        break;
+      case TipType.draw:
+        tipContext = 'Remis-Signal';
+        break;
+      case TipType.awayWin:
+        tipContext = 'Auswärtssieg-Signal';
+        break;
+      case TipType.over25:
+        tipContext = 'Tor-Markt Ü2.5';
+        break;
+      case TipType.under25:
+        tipContext = 'Tor-Markt U2.5';
+        break;
+      case TipType.btts:
+        tipContext = 'BTTS-Signal';
+        break;
+    }
+
+    switch (decision.type) {
+      case TopTipDecisionType.premium:
+        return 'Premium: $tipContext mit $source, Final ${score.finalScore.toStringAsFixed(1)}, Value $valueText und kontrolliertem Risiko.';
+      case TopTipDecisionType.value:
+        return 'Value: $tipContext wirkt im Verhältnis zur Quote interessant. Edge $valueText, Confidence ${score.confidence.toStringAsFixed(0)}%.';
+      case TopTipDecisionType.watch:
+        return 'Beobachten: $tipContext ist solide, aber noch kein Premium-Signal. Risiko ${match.riskLevel}, Final ${score.finalScore.toStringAsFixed(1)}.';
+      case TopTipDecisionType.noBet:
+        return 'No Bet: aktuell kein klares Signal. Risiko/Quote/Confidence passen noch nicht stabil zusammen.';
     }
   }
 
@@ -667,6 +733,9 @@ class _AnalysisTipTile extends StatelessWidget {
   final double confidence;
   final String statusLabel;
   final Color statusColor;
+  final String sourceLabel;
+  final Color sourceColor;
+  final String reason;
   final VoidCallback onTap;
 
   const _AnalysisTipTile({
@@ -677,6 +746,9 @@ class _AnalysisTipTile extends StatelessWidget {
     required this.confidence,
     required this.statusLabel,
     required this.statusColor,
+    required this.sourceLabel,
+    required this.sourceColor,
+    required this.reason,
     required this.onTap,
   });
 
@@ -759,6 +831,7 @@ class _AnalysisTipTile extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   _SmallPill(label: statusLabel, color: statusColor),
+                  _SmallPill(label: sourceLabel, color: sourceColor),
                   _SmallPill(label: match.tipLabel, color: KickMindTheme.primary),
                   _SmallPill(label: 'Final ${finalScore.toStringAsFixed(1)}', color: KickMindTheme.primaryDark),
                   _SmallPill(label: 'AI ${match.aiScore}%', color: KickMindTheme.warning),
@@ -767,6 +840,11 @@ class _AnalysisTipTile extends StatelessWidget {
                   _SmallPill(label: 'Quote ${match.odds.toStringAsFixed(2)}', color: KickMindTheme.textMuted),
                   _SmallPill(label: 'Conf ${confidence.toStringAsFixed(0)}%', color: KickMindTheme.primary),
                 ],
+              ),
+              const SizedBox(height: 10),
+              _AnalysisReasonBox(
+                text: reason,
+                color: statusColor,
               ),
             ],
           ),
@@ -782,6 +860,9 @@ class _CompactAnalysisTile extends StatelessWidget {
   final double valueEdge;
   final String statusLabel;
   final Color statusColor;
+  final String sourceLabel;
+  final Color sourceColor;
+  final String reason;
   final VoidCallback onTap;
 
   const _CompactAnalysisTile({
@@ -790,6 +871,9 @@ class _CompactAnalysisTile extends StatelessWidget {
     required this.valueEdge,
     required this.statusLabel,
     required this.statusColor,
+    required this.sourceLabel,
+    required this.sourceColor,
+    required this.reason,
     required this.onTap,
   });
 
@@ -799,7 +883,7 @@ class _CompactAnalysisTile extends StatelessWidget {
       icon: statusLabel == 'Watch' ? Icons.visibility_rounded : Icons.trending_up_rounded,
       iconColor: statusColor,
       title: match.teamsLabel,
-      subtitle: '$statusLabel · ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge >= 0 ? '+' : ''}${valueEdge.toStringAsFixed(1)}%',
+      subtitle: '$statusLabel · $sourceLabel · ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge >= 0 ? '+' : ''}${valueEdge.toStringAsFixed(1)}%',
       onTap: onTap,
     );
   }
@@ -900,6 +984,49 @@ class _SimpleInfoTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _AnalysisReasonBox extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _AnalysisReasonBox({
+    required this.text,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: color.withOpacity(0.13)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.psychology_alt_rounded, size: 17, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: KickMindTheme.textDark,
+                fontSize: 12.4,
+                height: 1.28,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1103,6 +1103,7 @@ class _LiveOddsCard extends StatelessWidget {
         ? 'Quoten vorhanden · Fixture ${odds.matchId}'
         : 'Aktualisiert ${_formatDateTime(odds.updatedAt)}';
     final relevance = _bestMarketRelevance(odds);
+    final explanation = _buildOddsExplanation(relevance, hasFallbackNames);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1174,6 +1175,12 @@ class _LiveOddsCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           _AiRelevancePanel(relevance: relevance),
+          const SizedBox(height: 10),
+          _LiveOddsReasonPanel(
+            relevance: relevance,
+            explanation: explanation,
+            hasFallbackNames: hasFallbackNames,
+          ),
           const SizedBox(height: 14),
           const Text(
             'Märkte',
@@ -1222,6 +1229,28 @@ class _LiveOddsCard extends StatelessWidget {
     final hour = value.hour.toString().padLeft(2, '0');
     final minute = value.minute.toString().padLeft(2, '0');
     return '$day.$month. $hour:$minute';
+  }
+
+  String _buildOddsExplanation(
+      _OddsRelevance relevance,
+      bool hasFallbackNames,
+      ) {
+    final market = '${relevance.label} ${relevance.name}';
+    final oddsText = relevance.oddsValue.toStringAsFixed(2);
+    final sourceText = hasFallbackNames
+        ? 'Die Quote ist echt, aber die Teamnamen fehlen noch im Odds-Datensatz.'
+        : 'Die Quote ist mit echten Teamnamen verknüpft.';
+
+    switch (relevance.decision.type) {
+      case OddsMarketDecisionType.premium:
+        return '$sourceText Bester Markt: $market bei Quote $oddsText. Score, Value und Risiko sprechen aktuell für ein starkes Signal.';
+      case OddsMarketDecisionType.value:
+        return '$sourceText Bester Markt: $market bei Quote $oddsText. Die Quote wirkt interessant, bleibt aber unter Premium-Niveau.';
+      case OddsMarketDecisionType.stable:
+        return '$sourceText Bester Markt: $market bei Quote $oddsText. Solide Quote, eher Beobachtung als aggressiver Tipp.';
+      case OddsMarketDecisionType.noBet:
+        return '$sourceText Bester Markt: $market bei Quote $oddsText. Aktuell kein klares Value-Signal, daher vorsichtig behandeln.';
+    }
   }
 }
 
@@ -1411,6 +1440,94 @@ class _OddsRelevance {
     required this.score,
     required this.decision,
   });
+}
+
+
+class _LiveOddsReasonPanel extends StatelessWidget {
+  final _OddsRelevance relevance;
+  final String explanation;
+  final bool hasFallbackNames;
+
+  const _LiveOddsReasonPanel({
+    required this.relevance,
+    required this.explanation,
+    required this.hasFallbackNames,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = hasFallbackNames ? const Color(0xFFB45309) : const Color(0xFF176CC7);
+    final sourceLabel = hasFallbackNames ? 'Teamdaten fehlen' : 'echte Teamnamen';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: hasFallbackNames ? const Color(0xFFFFFBEB) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: hasFallbackNames ? const Color(0xFFFDE68A) : const Color(0xFFE5E7EB),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                hasFallbackNames ? Icons.info_outline_rounded : Icons.fact_check_rounded,
+                size: 18,
+                color: color,
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Quoten-Einschätzung',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              _MiniScorePill(text: sourceLabel, color: color),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            explanation,
+            style: const TextStyle(
+              color: Color(0xFF374151),
+              fontSize: 12.2,
+              fontWeight: FontWeight.w800,
+              height: 1.32,
+            ),
+          ),
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: [
+              _SmallInfoChip(
+                icon: Icons.track_changes_rounded,
+                text: '${relevance.label} ${relevance.name}',
+              ),
+              _SmallInfoChip(
+                icon: Icons.payments_rounded,
+                text: relevance.oddsValue.toStringAsFixed(2),
+              ),
+              _SmallInfoChip(
+                icon: Icons.shield_rounded,
+                text: relevance.score.riskLevel,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _AiRelevancePanel extends StatelessWidget {

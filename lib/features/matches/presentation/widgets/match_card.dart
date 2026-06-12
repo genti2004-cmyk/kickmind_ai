@@ -23,7 +23,10 @@ class MatchCard extends StatelessWidget {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
     final riskColor = KickMindTheme.riskColor(match.riskLevel);
     final valueInfo = _ValueInfo.fromMatch(match);
-    final effectiveBadge = badge ?? (valueInfo.isValueBet ? '💰 VALUE BET' : null);
+    final effectiveBadge = badge ??
+        (valueInfo.isValueBet
+            ? '💰 VALUE BET'
+            : (!match.hasPlayableOdds ? '📅 Spielplan' : null));
 
     return InkWell(
       onTap: onTap,
@@ -116,7 +119,13 @@ class MatchCard extends StatelessWidget {
                 _Badge(text: match.tipLabel, color: KickMindTheme.primary),
                 _Badge(text: 'AI ${match.aiScore}%', color: scoreColor),
                 _Badge(text: '${match.riskEmoji} ${match.riskLevel}', color: riskColor),
-                _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: Colors.indigo),
+                if (match.hasPlayableOdds)
+                  _Badge(
+                    text: '${match.realOddsBookmaker ?? 'Bookmaker'} ${match.odds.toStringAsFixed(2)}',
+                    color: Colors.indigo,
+                  )
+                else
+                  _Badge(text: 'Keine echte Quote', color: Colors.blueGrey),
                 if (valueInfo.isValueBet)
                   _Badge(text: 'Value +${valueInfo.edgePercent.toStringAsFixed(1)}%', color: KickMindTheme.success),
                 if (trailing != null) trailing!,
@@ -149,7 +158,9 @@ class _ValueInfo {
   const _ValueInfo({required this.isValueBet, required this.edgePercent});
 
   factory _ValueInfo.fromMatch(FootballMatch match) {
-    if (match.odds <= 1.0) return const _ValueInfo(isValueBet: false, edgePercent: 0);
+    if (!match.hasPlayableOdds || match.odds <= 1.0) {
+      return const _ValueInfo(isValueBet: false, edgePercent: 0);
+    }
 
     final aiProbability = (match.aiScore / 100).clamp(0.0, 1.0);
     final impliedProbability = (1 / match.odds).clamp(0.0, 1.0);

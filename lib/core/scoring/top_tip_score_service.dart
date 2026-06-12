@@ -86,6 +86,21 @@ class TopTipScoreService {
   static const TopTipScoreService instance = TopTipScoreService._();
 
   TopTipScore score(FootballMatch match) {
+    if (!match.hasPlayableOdds) {
+      return TopTipScore(
+        finalScore: 1.0,
+        valueEdge: 0.0,
+        confidence: 1.0,
+        riskBonus: 0.0,
+        oddsBonus: 0.0,
+        formBoost: 0.0,
+        isRecommended: false,
+        isValueBet: false,
+        isHighRisk: true,
+        isLowRisk: false,
+      );
+    }
+
     final valueEdge = calculateValueEdge(match);
     final riskBonus = calculateRiskBonus(match);
     final oddsBonus = calculateOddsBonus(match.odds);
@@ -124,6 +139,16 @@ class TopTipScoreService {
   }
 
   TopTipDecision decision(FootballMatch match) {
+    if (!match.hasPlayableOdds) {
+      return const TopTipDecision(
+        type: TopTipDecisionType.noBet,
+        label: 'Keine echte Quote',
+        shortLabel: 'Ohne Quote',
+        title: 'Kein echter Wett-Tipp',
+        reason: 'Das Spiel ist echt, aber es liegt aktuell keine passende Bookmaker-Quote vor.',
+      );
+    }
+
     final score = this.score(match);
     final finalScore = score.finalScore;
     final confidence = score.confidence;
@@ -241,9 +266,9 @@ class TopTipScoreService {
     );
   }
 
-  bool isRecommendedTip(FootballMatch match) => score(match).isRecommended;
+  bool isRecommendedTip(FootballMatch match) => match.hasPlayableOdds && score(match).isRecommended;
 
-  bool isValueBet(FootballMatch match) => score(match).isValueBet;
+  bool isValueBet(FootballMatch match) => match.hasPlayableOdds && score(match).isValueBet;
 
   bool isHighRisk(FootballMatch match) {
     final risk = match.riskLevel.toLowerCase();
@@ -256,7 +281,7 @@ class TopTipScoreService {
   }
 
   double calculateValueEdge(FootballMatch match) {
-    if (match.odds <= 1.0) return 0.0;
+    if (!match.hasPlayableOdds || match.odds <= 1.0) return 0.0;
 
     final aiProbability = (match.aiScore / 100.0).clamp(0.0, 1.0).toDouble();
     final impliedProbability = (1.0 / match.odds).clamp(0.0, 1.0).toDouble();

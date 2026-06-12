@@ -238,7 +238,9 @@ class _SavedSummary extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '${stats.count} gespeicherte Tipps · Ø AI ${stats.averageAi.toStringAsFixed(0)}%',
+            '${stats.count} gespeicherte Tipps · Ø AI ${stats.averageAi.toStringAsFixed(0)}% · Ø Quote ${stats.averageOdds.toStringAsFixed(2)} · Best ${stats.bestFinal.toStringAsFixed(1)}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: Colors.white.withOpacity(0.78),
               fontSize: 14,
@@ -450,6 +452,16 @@ class _SavedTipCard extends StatelessWidget {
                     background: decision.color.withOpacity(0.10),
                   ),
                   _MetricChip(
+                    text: _sourceLabel(match),
+                    color: _hasRealBookmakerOdds(match)
+                        ? KickMindTheme.success
+                        : Colors.blueGrey,
+                    background: (_hasRealBookmakerOdds(match)
+                            ? KickMindTheme.success
+                            : Colors.blueGrey)
+                        .withOpacity(0.10),
+                  ),
+                  _MetricChip(
                     text: match.tipLabel,
                     color: KickMindTheme.primary,
                     background: KickMindTheme.primary.withOpacity(0.10),
@@ -512,17 +524,12 @@ class _SavedTipCard extends StatelessWidget {
                   valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                _reasonText(match, score, value, decision),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.grey.shade800,
-                  height: 1.35,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
+              const SizedBox(height: 10),
+              _SavedReasonPanel(
+                match: match,
+                score: score,
+                value: value,
+                decision: decision,
               ),
             ],
           ),
@@ -539,17 +546,132 @@ class _SavedTipCard extends StatelessWidget {
     return '$hour:$minute';
   }
 
+  static bool _hasRealBookmakerOdds(FootballMatch match) {
+    return match.id.startsWith('odds_');
+  }
+
+  static String _sourceLabel(FootballMatch match) {
+    return _hasRealBookmakerOdds(match) ? 'Echte Quote' : 'Spielplan';
+  }
+
+  static String _tipMeaning(FootballMatch match) {
+    final label = match.tipLabel.toLowerCase();
+    if (label == '1' || label.contains('heim')) {
+      return 'AI sieht den Heimtipp als stärkste Auswahl.';
+    }
+    if (label == '2' || label.contains('aus')) {
+      return 'AI bewertet die Auswärtsseite stärker.';
+    }
+    if (label == 'x' || label.contains('remis')) {
+      return 'AI erkennt ein ausgeglichenes Spielprofil.';
+    }
+    if (label.contains('ü') || label.contains('over')) {
+      return 'Tore-Trend spricht eher für ein offensives Spiel.';
+    }
+    if (label.contains('u') || label.contains('under')) {
+      return 'Tore-Trend spricht eher für ein kontrolliertes Spiel.';
+    }
+    if (label.contains('btts')) {
+      return 'Beide Teams haben ein passendes Trefferprofil.';
+    }
+    return 'AI priorisiert diesen Tipp anhand der verfügbaren Werte.';
+  }
+
   static String _reasonText(
       FootballMatch match,
       TopTipScore score,
       _ValueInfo value,
       _SavedTipDecision decision,
       ) {
+    final source = _sourceLabel(match);
     final valueText = value.isValueBet
-        ? ' · Value +${value.edgePercent.toStringAsFixed(1)}%'
-        : '';
+        ? ' Value +${value.edgePercent.toStringAsFixed(1)}%.'
+        : ' Kein starker Value-Vorteil.';
+    return '${decision.label} · $source. ${_tipMeaning(match)} Final ${score.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${score.confidence.toStringAsFixed(0)}%.$valueText';
+  }
+}
 
-    return '${decision.label}: ${match.tipLabel} · Final ${score.finalScore.toStringAsFixed(1)} · AI ${match.aiScore}% · Conf ${score.confidence.toStringAsFixed(0)}%$valueText';
+class _SavedReasonPanel extends StatelessWidget {
+  final FootballMatch match;
+  final TopTipScore score;
+  final _ValueInfo value;
+  final _SavedTipDecision decision;
+
+  const _SavedReasonPanel({
+    required this.match,
+    required this.score,
+    required this.value,
+    required this.decision,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sourceIsReal = _SavedTipCard._hasRealBookmakerOdds(match);
+    final sourceColor = sourceIsReal ? KickMindTheme.success : Colors.blueGrey;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: decision.color.withOpacity(0.055),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: decision.color.withOpacity(0.12)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.insights_rounded, size: 17, color: decision.color),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  decision.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: decision.color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              _MetricChip(
+                text: sourceIsReal ? 'echte Quote' : 'Spielplan',
+                color: sourceColor,
+                background: sourceColor.withOpacity(0.10),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _SavedTipCard._reasonText(match, score, value, decision),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: KickMindTheme.textDark,
+              height: 1.32,
+              fontSize: 12.8,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          if (decision.reason.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              decision.reason,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: KickMindTheme.textMuted,
+                height: 1.28,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 

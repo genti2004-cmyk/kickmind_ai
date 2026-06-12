@@ -57,11 +57,42 @@ class MatchRepositoryImpl implements MatchRepository {
       return matches;
     }
 
+    // SofaScore-Logik: Spielplan zuerst stabil anzeigen. Pro-Enrichment darf
+    // nicht hunderte Fixture-Only-Spiele blockieren oder bei API-Limits leer wirken lassen.
+    final playableIds = matches.where((m) => m.hasPlayableOdds).map((m) => m.id).toSet();
+    if (playableIds.isEmpty) {
+      return matches;
+    }
+
     final enriched = await Future.wait(
       matches.map((match) async {
+        if (!playableIds.contains(match.id)) {
+          return match.copyWith(
+            riskLevel: 'Kein Tipp',
+            odds: 0.0,
+            hasRealOdds: false,
+            realOddsBookmaker: null,
+            shortReason: match.shortReason,
+          );
+        }
+
         try {
           final input = await _stats.buildInput(match);
-          return _engine.buildProMatch(input);
+          final proMatch = _engine.buildProMatch(input);
+
+          // Pro-Enrichment darf Score/Form verbessern, aber nicht den echten
+          // Bookmaker-Markt und die echte Quote überschreiben.
+          return proMatch.copyWith(
+            tipType: match.tipType,
+            tipLabel: match.tipLabel,
+            odds: match.odds,
+            hasRealOdds: match.hasRealOdds,
+            realOddsBookmaker: match.realOddsBookmaker,
+            shortReason: _mergeReasons(
+              proReason: proMatch.shortReason,
+              bookmakerReason: match.shortReason,
+            ),
+          );
         } catch (_) {
           return match;
         }
@@ -70,6 +101,20 @@ class MatchRepositoryImpl implements MatchRepository {
 
     enriched.sort((a, b) => a.kickoff.compareTo(b.kickoff));
     return enriched;
+  }
+
+
+  String _mergeReasons({
+    required String proReason,
+    required String bookmakerReason,
+  }) {
+    final marker = 'Quote von ';
+    final markerIndex = bookmakerReason.indexOf(marker);
+    if (markerIndex < 0) return proReason;
+
+    final bookmakerPart = bookmakerReason.substring(markerIndex).trim();
+    if (bookmakerPart.isEmpty) return proReason;
+    return '$proReason · $bookmakerPart';
   }
 
   int _safeDurationDays(MatchDateRange range) {

@@ -6,6 +6,9 @@ import 'package:kickmind_ai/features/matches/data/repositories/match_repository_
 import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/matches/domain/match_date_range.dart';
 import 'package:kickmind_ai/features/matches/presentation/match_detail_screen.dart';
+import 'package:kickmind_ai/features/odds/data/live_odds_service.dart';
+import 'package:kickmind_ai/features/odds/domain/live_odds.dart';
+import 'package:kickmind_ai/features/predictions/domain/prediction_engine.dart';
 import 'package:kickmind_ai/features/saved_tips/data/saved_tips_service.dart';
 
 class TopTipsScreen extends StatefulWidget {
@@ -19,6 +22,8 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
   final MatchRepositoryImpl _repository = MatchRepositoryImpl();
   final TopTipScoreService _scoreService = TopTipScoreService.instance;
   final SavedTipsService _savedTipsService = SavedTipsService();
+  final LiveOddsService _liveOddsService = LiveOddsService();
+  final PredictionEngine _predictionEngine = const PredictionEngine();
 
   MatchDateRange _range = MatchDateRange.today;
   late Future<List<FootballMatch>> _future;
@@ -31,8 +36,195 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     _loadSavedIds();
   }
 
-  Future<List<FootballMatch>> _load() {
-    return _repository.getMatches(range: _range);
+  Future<List<FootballMatch>> _load({bool forceRefresh = false}) async {
+    final oddsMatches = await _loadRealOddsTopTips(forceRefresh: forceRefresh);
+    debugPrint('TOP_TIPS ODDS MATCHES ${_range.name}: ${oddsMatches.length}');
+
+    // Fallback auf exakt dieselbe echte Spielquelle wie Analyse/Spiele.
+    // Wichtig: Top Tips darf nicht leer bleiben, nur weil API-Football keine
+    // Teamnamen oder keine verwertbare Quote liefert. Es werden hier keine
+    // Fake-Spiele erzeugt; es werden nur echte Repository-Spiele bewertet.
+    final repositoryMatches = await _loadRepositoryFallbackMatches();
+
+    if (oddsMatches.isEmpty) {
+      return repositoryMatches;
+    }
+
+    // Wenn API-Football Odds ohne echte Teamnamen liefert, entstehen sonst
+    // Karten wie „Heimteam 1492911 vs Auswärtsteam 1492911“. Diese werden
+    // nicht angezeigt. Stattdessen füllen wir mit echten Repository-Spielen
+    // auf, damit Top Tips lesbar bleibt und keine ID-Namen zeigt.
+    final merged = <FootballMatch>[];
+    final seen = <String>{};
+
+    void addMatch(FootballMatch match) {
+      final key = _matchDedupeKey(match);
+      if (seen.add(key)) merged.add(match);
+    }
+
+    for (final match in oddsMatches) {
+      addMatch(match);
+    }
+
+    if (merged.length < 5) {
+      for (final match in repositoryMatches) {
+        addMatch(match);
+        if (merged.length >= 5) break;
+      }
+    }
+
+    merged.sort(_compareByTopTipQuality);
+    debugPrint('TOP_TIPS MERGED ${_range.name}: ${merged.length}');
+    return merged;
+  }
+
+  Future<List<FootballMatch>> _loadRepositoryFallbackMatches() async {
+    final matches = await _repository.getMatches(range: _range);
+    final normalized = matches
+        .where((match) =>
+    _isRealTeamName(match.homeTeam) &&
+        _isRealTeamName(match.awayTeam))
+        .map(_ensurePlayableTopTip)
+        .toList();
+
+    normalized.sort(_compareByTopTipQuality);
+    debugPrint('TOP_TIPS REPOSITORY FALLBACK ${_range.name}: ${normalized.length}');
+    return normalized;
+  }
+
+  Future<List<FootballMatch>> _loadRealOddsTopTips({bool forceRefresh = false}) async {
+    final now = DateTime.now();
+    final start = _range.startDate(now);
+    final days = _range.durationDays.clamp(1, 7).toInt();
+
+    final odds = await _liveOddsService.fetchLiveOddsForRange(
+      start: start,
+      days: days,
+      forceRefresh: forceRefresh,
+    );
+
+    debugPrint(
+      'TOP_TIPS LIVE_ODDS RAW ${_range.name}: ${odds.length} | ${_liveOddsService.lastDiagnostics.message}',
+    );
+
+    final matches = <FootballMatch>[];
+    for (final item in odds) {
+      final match = _matchFromLiveOdds(item, fallbackKickoff: start);
+      if (match != null) matches.add(match);
+    }
+
+    matches.sort(_compareByTopTipQuality);
+    return matches;
+  }
+
+  FootballMatch? _matchFromLiveOdds(
+      LiveOdds odds, {
+        required DateTime fallbackKickoff,
+      }) {
+    final market = _selectBestMarket(odds);
+    if (market == null) return null;
+
+    final fixtureId = odds.matchId.trim();
+    final home = _safeTeamName(
+      odds.homeTeam,
+      fallback: fixtureId.isEmpty ? 'Heimteam' : 'Heimteam $fixtureId',
+    );
+    final away = _safeTeamName(
+      odds.awayTeam,
+      fallback: fixtureId.isEmpty ? 'Auswärtsteam' : 'Auswärtsteam $fixtureId',
+    );
+
+    if (!_isRealTeamName(home) || !_isRealTeamName(away)) {
+      debugPrint('TOP_TIPS SKIP SYNTHETIC ODDS TEAM $fixtureId: $home vs $away');
+      return null;
+    }
+
+    return _predictionEngine.buildMatch(
+      id: 'odds_${fixtureId}_${market.tipType.name}',
+      fixtureId: int.tryParse(fixtureId),
+      league: odds.bookmaker,
+      home: home,
+      away: away,
+      kickoff: DateTime(
+        fallbackKickoff.year,
+        fallbackKickoff.month,
+        fallbackKickoff.day,
+        12,
+      ),
+      tipType: market.tipType,
+      odds: market.odds,
+    );
+  }
+
+  FootballMatch _ensurePlayableTopTip(FootballMatch match) {
+    if (match.odds > 1.05 && match.aiScore > 0) return match;
+
+    return _predictionEngine.buildMatch(
+      id: match.id,
+      fixtureId: match.fixtureId,
+      season: match.season,
+      league: match.league,
+      home: match.homeTeam,
+      away: match.awayTeam,
+      kickoff: match.kickoff,
+      tipType: match.tipType,
+      odds: match.odds > 1.05 ? match.odds : null,
+      homeFormScore: match.homeFormScore,
+      awayFormScore: match.awayFormScore,
+      goalsScore: match.goalsScore,
+    );
+  }
+
+  String _safeTeamName(String value, {required String fallback}) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return fallback;
+    return trimmed;
+  }
+
+  bool _isRealTeamName(String value) {
+    final text = value.trim();
+    if (text.isEmpty) return false;
+    final lower = text.toLowerCase();
+    if (RegExp(r'^(heimteam|auswärtsteam|auswaertsteam)\s*\d+$').hasMatch(lower)) {
+      return false;
+    }
+    if (RegExp(r'^\d+$').hasMatch(text)) return false;
+    return true;
+  }
+
+  String _matchDedupeKey(FootballMatch match) {
+    final home = match.homeTeam.trim().toLowerCase();
+    final away = match.awayTeam.trim().toLowerCase();
+    final date = DateTime(match.kickoff.year, match.kickoff.month, match.kickoff.day);
+    return '$home|$away|${date.toIso8601String()}';
+  }
+
+  _OddsMarket? _selectBestMarket(LiveOdds odds) {
+    final markets = <_OddsMarket>[
+      _OddsMarket(TipType.homeWin, odds.homeWin),
+      _OddsMarket(TipType.awayWin, odds.awayWin),
+      if (odds.over25 != null) _OddsMarket(TipType.over25, odds.over25!),
+      if (odds.bttsYes != null) _OddsMarket(TipType.btts, odds.bttsYes!),
+      if (odds.under25 != null) _OddsMarket(TipType.under25, odds.under25!),
+      _OddsMarket(TipType.draw, odds.draw),
+    ].where((market) => market.odds > 1.05).toList();
+
+    if (markets.isEmpty) return null;
+
+    int marketRank(_OddsMarket market) {
+      if (market.odds >= 1.35 && market.odds <= 2.35) return 0;
+      if (market.odds > 2.35 && market.odds <= 3.10) return 1;
+      if (market.odds > 1.05 && market.odds < 1.35) return 2;
+      return 3;
+    }
+
+    markets.sort((a, b) {
+      final rankCompare = marketRank(a).compareTo(marketRank(b));
+      if (rankCompare != 0) return rankCompare;
+      return (a.odds - 1.85).abs().compareTo((b.odds - 1.85).abs());
+    });
+
+    return markets.first;
   }
 
   void _setRange(MatchDateRange range) {
@@ -45,7 +237,7 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = _load());
+    setState(() => _future = _load(forceRefresh: true));
     _loadSavedIds();
     await _future;
   }
@@ -125,16 +317,22 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
             return _TopTipsEmptyState(onRefresh: _refresh);
           }
 
-          final ranked = matches..sort(_compareByFinalScore);
+          final ranked = matches..sort(_compareByTopTipQuality);
 
-          final recommended = ranked.where(_isRecommendedTip).toList();
+          final recommended = ranked.where(_isDisplayRecommendedTip).toList();
           final visibleTopTips = recommended.isNotEmpty
-              ? recommended
+              ? recommended.take(8).toList()
+              : ranked.where((match) => _finalScore(match) >= 50).take(8).toList();
+          final safeVisibleTopTips = visibleTopTips.isNotEmpty
+              ? visibleTopTips
               : ranked.take(5).toList();
 
-          final valueBets = ranked.where(_isValueBet).take(4).toList();
+          final valueBets = ranked
+              .where((match) => _isValueBet(match) && _hasUsableOdds(match))
+              .take(4)
+              .toList();
           final watchList = ranked
-              .where((match) => !visibleTopTips.contains(match))
+              .where((match) => !safeVisibleTopTips.contains(match))
               .where((match) => _finalScore(match) >= 58)
               .take(6)
               .toList();
@@ -153,6 +351,9 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                 _TopTipsSummaryStrip(
                   rangeLabel: _range.label,
                   matchesCount: matches.length,
+                  realOddsCount: matches.where(_hasRealBookmakerOdds).length,
+                  recommendedCount: recommended.length,
+                  valueCount: valueBets.length,
                   bestScore: _finalScore(ranked.first),
                   bestAiScore: ranked.first.aiScore,
                 ),
@@ -160,13 +361,13 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
                 const _SectionTitle(
                   icon: Icons.auto_awesome_rounded,
                   title: 'Beste Auswahl',
-                  subtitle: 'Streng sortiert nach Final Score, Value und Risiko.',
+                  subtitle: 'Sortiert nach echter Quote, Final Score, Value, Risiko und Spielnähe.',
                 ),
                 const SizedBox(height: 12),
-                ...visibleTopTips.take(8).map(
+                ...safeVisibleTopTips.take(8).map(
                       (match) => _TopTipCard(
                     match: match,
-                    rank: visibleTopTips.indexOf(match) + 1,
+                    rank: safeVisibleTopTips.indexOf(match) + 1,
                     finalScore: _finalScore(match),
                     valueEdge: _valueEdge(match),
                     confidence: _confidence(match),
@@ -228,13 +429,6 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     ).then((_) => _loadSavedIds());
   }
 
-  int _compareByFinalScore(FootballMatch a, FootballMatch b) {
-    return _scoreService.compareByFinalScore(a, b);
-  }
-
-  bool _isRecommendedTip(FootballMatch match) {
-    return _scoreService.isRecommendedTip(match);
-  }
 
   bool _isValueBet(FootballMatch match) {
     return _scoreService.isValueBet(match);
@@ -252,17 +446,91 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     return _scoreService.score(match).valueEdge;
   }
 
+  bool _isDisplayRecommendedTip(FootballMatch match) {
+    final score = _scoreService.score(match);
+    if (score.finalScore < 50) return false;
+    if (_isHighRisk(match) && score.finalScore < 70) return false;
+    return score.isRecommended || score.isValueBet || score.finalScore >= 60;
+  }
+
+  bool _hasRealBookmakerOdds(FootballMatch match) {
+    return match.id.startsWith('odds_');
+  }
+
+  bool _hasUsableOdds(FootballMatch match) {
+    return match.odds >= 1.18 && match.odds <= 4.50;
+  }
+
+  bool _isHighRisk(FootballMatch match) {
+    final risk = match.riskLevel.toLowerCase().trim();
+    return risk == 'hoch' || risk == 'high';
+  }
+
+  int _compareByTopTipQuality(FootballMatch a, FootballMatch b) {
+    final qualityCompare = _topTipQualityScore(b).compareTo(_topTipQualityScore(a));
+    if (qualityCompare != 0) return qualityCompare;
+
+    final finalScoreCompare = _finalScore(b).compareTo(_finalScore(a));
+    if (finalScoreCompare != 0) return finalScoreCompare;
+
+    final aiCompare = b.aiScore.compareTo(a.aiScore);
+    if (aiCompare != 0) return aiCompare;
+
+    return a.kickoff.compareTo(b.kickoff);
+  }
+
+  double _topTipQualityScore(FootballMatch match) {
+    final score = _scoreService.score(match);
+    final realOddsBoost = _hasRealBookmakerOdds(match) ? 8.0 : 0.0;
+    final oddsRangeBoost = _hasUsableOdds(match) ? 4.0 : -6.0;
+    final riskBoost = _isHighRisk(match)
+        ? -12.0
+        : match.riskLevel.toLowerCase().contains('niedrig') ||
+        match.riskLevel.toLowerCase().contains('low')
+        ? 5.0
+        : 1.5;
+    final valueBoost = score.valueEdge.clamp(-8.0, 12.0).toDouble() * 0.45;
+    final kickoffBoost = _kickoffPriorityBoost(match.kickoff);
+
+    return score.finalScore + realOddsBoost + oddsRangeBoost + riskBoost + valueBoost + kickoffBoost;
+  }
+
+  double _kickoffPriorityBoost(DateTime kickoff) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final matchDay = DateTime(kickoff.year, kickoff.month, kickoff.day);
+    final diff = matchDay.difference(today).inDays;
+    if (diff == 0) return 2.0;
+    if (diff == 1) return 1.2;
+    if (diff >= 2 && diff <= 7) return 0.4;
+    return 0.0;
+  }
+
+}
+
+
+class _OddsMarket {
+  final TipType tipType;
+  final double odds;
+
+  const _OddsMarket(this.tipType, this.odds);
 }
 
 class _TopTipsSummaryStrip extends StatelessWidget {
   final String rangeLabel;
   final int matchesCount;
+  final int realOddsCount;
+  final int recommendedCount;
+  final int valueCount;
   final double bestScore;
   final int bestAiScore;
 
   const _TopTipsSummaryStrip({
     required this.rangeLabel,
     required this.matchesCount,
+    required this.realOddsCount,
+    required this.recommendedCount,
+    required this.valueCount,
     required this.bestScore,
     required this.bestAiScore,
   });
@@ -309,7 +577,7 @@ class _TopTipsSummaryStrip extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  'Bester Final ${bestScore.toStringAsFixed(1)} · AI $bestAiScore%',
+                  'Bester Final ${bestScore.toStringAsFixed(1)} · AI $bestAiScore% · Quote $realOddsCount · Value $valueCount',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -508,25 +776,24 @@ class _TopTipCard extends StatelessWidget {
     final riskColor = KickMindTheme.riskColor(match.riskLevel);
     final cardReason = _buildCardReason();
     final oddsRelevance = _TopTipOddsRelevance.fromMatch(match);
+    final primaryBorder = rank == 1
+        ? KickMindTheme.primary.withOpacity(0.34)
+        : Colors.black.withOpacity(0.055);
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(24),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 13),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
         decoration: BoxDecoration(
           color: KickMindTheme.surface,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: rank == 1
-                ? KickMindTheme.primary.withOpacity(0.28)
-                : Colors.black.withOpacity(0.045),
-          ),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: primaryBorder),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(rank == 1 ? 0.085 : 0.055),
-              blurRadius: rank == 1 ? 22 : 16,
+              color: Colors.black.withOpacity(rank == 1 ? 0.095 : 0.055),
+              blurRadius: rank == 1 ? 24 : 16,
               offset: const Offset(0, 10),
             ),
           ],
@@ -539,87 +806,189 @@ class _TopTipCard extends StatelessWidget {
                 _RankBadge(rank: rank),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    match.league,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: KickMindTheme.textMuted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        match.league,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: KickMindTheme.textMuted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          Icon(Icons.schedule_rounded, size: 14, color: Colors.grey.shade600),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              match.kickoffLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: KickMindTheme.textMuted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 8),
-                Icon(Icons.schedule_rounded, size: 16, color: Colors.grey.shade600),
-                const SizedBox(width: 4),
-                Text(
-                  match.kickoffLabel,
-                  style: const TextStyle(
-                    color: KickMindTheme.textMuted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  tooltip: isSaved ? 'Tipp entfernen' : 'Tipp speichern',
-                  onPressed: onSaveTap,
-                  icon: Icon(
-                    isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-                    color: isSaved ? KickMindTheme.primary : KickMindTheme.textMuted,
-                  ),
+                _SourceBadge(text: _dataSourceLabel(), color: _dataSourceColor()),
+                const SizedBox(width: 6),
+                _SaveCircleButton(
+                  isSaved: isSaved,
+                  onTap: onSaveTap,
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 14),
             Text(
               match.teamsLabel,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: KickMindTheme.textDark,
-                fontSize: 17.5,
+                fontSize: 18,
                 height: 1.12,
                 fontWeight: FontWeight.w900,
               ),
             ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _TipPill(text: match.tipLabel, color: KickMindTheme.primary),
-                _TipPill(text: 'AI ${match.aiScore}%', color: scoreColor),
-                _TipPill(text: 'Final ${finalScore.toStringAsFixed(1)}', color: KickMindTheme.primaryDark),
-                _TipPill(text: '${match.riskEmoji} ${match.riskLevel}', color: riskColor),
-                _TipPill(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: Colors.indigo),
-                if (valueEdge > 0)
-                  _TipPill(
-                    text: 'Value +${valueEdge.toStringAsFixed(1)}%',
-                    color: KickMindTheme.success,
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+              decoration: BoxDecoration(
+                color: KickMindTheme.primary.withOpacity(0.055),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: KickMindTheme.primary.withOpacity(0.10)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: KickMindTheme.primary.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      match.tipLabel,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: KickMindTheme.primary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                   ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Empfohlener Tipp',
+                          style: TextStyle(
+                            color: KickMindTheme.textMuted,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          cardReason,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: KickMindTheme.textDark,
+                            height: 1.18,
+                            fontSize: 13.2,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _MetricTile(
+                    label: 'Final',
+                    value: finalScore.toStringAsFixed(1),
+                    color: KickMindTheme.primaryDark,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MetricTile(
+                    label: 'AI',
+                    value: '${match.aiScore}%',
+                    color: scoreColor,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MetricTile(
+                    label: 'Quote',
+                    value: match.odds.toStringAsFixed(2),
+                    color: Colors.indigo,
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _MetricTile(
+                    label: 'Risiko',
+                    value: '${match.riskEmoji} ${match.riskLevel}',
+                    color: riskColor,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MetricTile(
+                    label: 'Value',
+                    value: valueEdge >= 0
+                        ? '+${valueEdge.toStringAsFixed(1)}%'
+                        : '${valueEdge.toStringAsFixed(1)}%',
+                    color: valueEdge > 0 ? KickMindTheme.success : Colors.orange.shade800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             _ScoreBar(
               label: 'Confidence',
               value: confidence,
               color: scoreColor,
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 11),
             _TopTipOddsPanel(relevance: oddsRelevance),
-            const SizedBox(height: 9),
-            Text(
-              cardReason,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: Colors.grey.shade800,
-                height: 1.25,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-              ),
+            const SizedBox(height: 10),
+            _TopTipReasonPanel(
+              match: match,
+              finalScore: finalScore,
+              valueEdge: valueEdge,
+              confidence: confidence,
+              hasRealBookmakerOdds: _hasRealBookmakerOdds(),
             ),
           ],
         ),
@@ -631,20 +1000,317 @@ class _TopTipCard extends StatelessWidget {
     final valueText = valueEdge >= 0
         ? '+${valueEdge.toStringAsFixed(1)}%'
         : '${valueEdge.toStringAsFixed(1)}%';
+    final sourceText = _hasRealBookmakerOdds() ? 'echte Bookmaker-Quote' : 'Spielplan-Analyse';
+    final riskOk = !_isHighRisk();
 
-    if (finalScore >= 74 && valueEdge >= 8 && match.riskLevel != 'Hoch') {
-      return 'Premium · ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value $valueText';
+    if (finalScore >= 74 && valueEdge >= 8 && riskOk) {
+      return 'Premium-Signal · $sourceText · Value $valueText · Risiko kontrolliert';
     }
 
-    if (valueEdge >= 8 && match.riskLevel != 'Hoch') {
-      return 'Value · ${match.tipLabel} · Quote ${match.odds.toStringAsFixed(2)} · Edge $valueText';
+    if (valueEdge >= 8 && riskOk) {
+      return 'Value-Signal · $sourceText · Marktwert stärker als Risiko';
     }
 
-    if (finalScore >= 55 && match.riskLevel != 'Hoch') {
-      return 'Watch · solide Datenlage · Final ${finalScore.toStringAsFixed(1)}';
+    if (finalScore >= 65 && confidence >= 62 && riskOk) {
+      return 'Stabiler Tipp · $sourceText · AI und Confidence passen zusammen';
     }
 
-    return 'No Bet · aktuell kein klares Value-Signal';
+    if (finalScore >= 58 && riskOk) {
+      return 'Solide Auswahl · $sourceText · Beobachten mit leichter Tendenz';
+    }
+
+    if (finalScore >= 50) {
+      return 'Beobachten · $sourceText · noch kein klares Premium-Signal';
+    }
+
+    return 'No Bet · Datenlage aktuell zu schwach';
+  }
+
+  bool _hasRealBookmakerOdds() {
+    return match.id.startsWith('odds_');
+  }
+
+  bool _isHighRisk() {
+    final risk = match.riskLevel.toLowerCase().trim();
+    return risk == 'hoch' || risk == 'high';
+  }
+
+  String _dataSourceLabel() {
+    return _hasRealBookmakerOdds() ? 'Echte Quote' : 'Spielplan';
+  }
+
+  Color _dataSourceColor() {
+    return _hasRealBookmakerOdds() ? KickMindTheme.success : Colors.blueGrey;
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _MetricTile({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.075),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: color.withOpacity(0.13)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: KickMindTheme.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SourceBadge extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _SourceBadge({required this.text, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.16)),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 11.2,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _SaveCircleButton extends StatelessWidget {
+  final bool isSaved;
+  final VoidCallback onTap;
+
+  const _SaveCircleButton({required this.isSaved, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: isSaved
+          ? KickMindTheme.primary.withOpacity(0.12)
+          : Colors.black.withOpacity(0.035),
+      borderRadius: BorderRadius.circular(15),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(15),
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: Icon(
+            isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+            color: isSaved ? KickMindTheme.primary : KickMindTheme.textMuted,
+            size: 22,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+class _TopTipReasonPanel extends StatelessWidget {
+  final FootballMatch match;
+  final double finalScore;
+  final double valueEdge;
+  final double confidence;
+  final bool hasRealBookmakerOdds;
+
+  const _TopTipReasonPanel({
+    required this.match,
+    required this.finalScore,
+    required this.valueEdge,
+    required this.confidence,
+    required this.hasRealBookmakerOdds,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _statusColor();
+    final points = _reasonPoints();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.055),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.13)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.psychology_alt_rounded, size: 17, color: color),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  _statusTitle(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...points.map(
+                (point) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '•',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 13,
+                      height: 1.24,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      point,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: KickMindTheme.textMuted,
+                        fontSize: 12.2,
+                        height: 1.24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _statusTitle() {
+    if (_isHighRisk() && finalScore < 70) {
+      return 'Begründung · vorsichtig bewerten';
+    }
+    if (hasRealBookmakerOdds && valueEdge >= 8 && finalScore >= 70) {
+      return 'Begründung · starkes Value-Signal';
+    }
+    if (hasRealBookmakerOdds) {
+      return 'Begründung · echte Quote vorhanden';
+    }
+    return 'Begründung · Spielplan-Tipp ohne echte Quote';
+  }
+
+  List<String> _reasonPoints() {
+    final points = <String>[];
+
+    points.add(
+      hasRealBookmakerOdds
+          ? 'Echte Bookmaker-Quote erkannt; Tipp basiert nicht auf einer erfundenen Quote.'
+          : 'Keine passende Bookmaker-Quote erkannt; Bewertung läuft nur über Spielplan und AI-Score.',
+    );
+
+    if (match.tipType == TipType.homeWin) {
+      points.add('Tendenz auf Heimsieg: AI bewertet das Heimteam im aktuellen Modell stärker.');
+    } else if (match.tipType == TipType.awayWin) {
+      points.add('Tendenz auf Auswärtssieg: AI sieht den Gast im Modell mit Vorteil.');
+    } else if (match.tipType == TipType.draw) {
+      points.add('Remis-Tipp: das Modell sieht kein klares Übergewicht für eine Seite.');
+    } else if (match.tipType == TipType.over25) {
+      points.add('Tore-Tipp Ü2.5: die Tor-/Dynamik-Bewertung spricht eher für ein offenes Spiel.');
+    } else if (match.tipType == TipType.under25) {
+      points.add('Tore-Tipp U2.5: die Bewertung spricht eher für ein kontrolliertes Spiel.');
+    } else if (match.tipType == TipType.btts) {
+      points.add('BTTS-Tipp: beide Teams werden offensiv als relevant eingestuft.');
+    }
+
+    if (valueEdge >= 8) {
+      points.add('Value Edge ist positiv: Quote und AI-Bewertung passen überdurchschnittlich gut zusammen.');
+    } else if (valueEdge >= 0) {
+      points.add('Value ist leicht positiv: kein Premium-Signal, aber als Auswahl beobachtbar.');
+    } else {
+      points.add('Value ist schwach: eher beobachten als blind übernehmen.');
+    }
+
+    if (_isHighRisk()) {
+      points.add('Risiko ist hoch: nur mit kleinerem Einsatz oder als Watchlist-Tipp betrachten.');
+    } else if (confidence >= 70) {
+      points.add('Confidence ist stark: die Datenlage ist für diesen Tipp vergleichsweise stabil.');
+    } else if (confidence >= 55) {
+      points.add('Confidence ist solide: Signal ist brauchbar, aber nicht maximal stark.');
+    } else {
+      points.add('Confidence ist niedrig: Tipp sollte zurückhaltend bewertet werden.');
+    }
+
+    return points.take(4).toList();
+  }
+
+  Color _statusColor() {
+    if (_isHighRisk() && finalScore < 70) return Colors.orange.shade800;
+    if (hasRealBookmakerOdds && valueEdge >= 8 && finalScore >= 70) {
+      return KickMindTheme.success;
+    }
+    if (hasRealBookmakerOdds) return KickMindTheme.primary;
+    return Colors.blueGrey;
+  }
+
+  bool _isHighRisk() {
+    final risk = match.riskLevel.toLowerCase().trim();
+    return risk == 'hoch' || risk == 'high';
   }
 }
 
@@ -848,37 +1514,58 @@ class _CompactTipCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
     final oddsRelevance = _TopTipOddsRelevance.fromMatch(match);
-    final compactLine =
-        '${match.tipLabel} · Q ${oddsRelevance.score.finalScore.toStringAsFixed(0)} · Quote ${oddsRelevance.oddsValue.toStringAsFixed(2)} · ${oddsRelevance.decision.label}';
+    final isRealOdds = match.id.startsWith('odds_');
+    final sourceLabel = isRealOdds ? 'Echte Quote' : 'Spielplan';
+    final sourceColor = isRealOdds ? KickMindTheme.success : Colors.blueGrey;
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 9),
-        padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
         decoration: BoxDecoration(
           color: KickMindTheme.surface,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(color: Colors.black.withOpacity(0.045)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.035),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
         ),
         child: Row(
           children: [
             Container(
-              width: 42,
-              height: 42,
+              width: 46,
+              height: 46,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: scoreColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
               ),
-              child: Text(
-                '${match.aiScore}',
-                style: TextStyle(
-                  color: scoreColor,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w900,
-                ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    finalScore.toStringAsFixed(0),
+                    style: TextStyle(
+                      color: scoreColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  Text(
+                    'Final',
+                    style: TextStyle(
+                      color: scoreColor.withOpacity(0.85),
+                      fontSize: 8.5,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(width: 12),
@@ -892,20 +1579,26 @@ class _CompactTipCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: KickMindTheme.textDark,
-                      fontSize: 14.5,
+                      fontSize: 14.7,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    compactLine,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: KickMindTheme.textMuted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 5,
+                    children: [
+                      _MiniScorePill(text: sourceLabel, color: sourceColor),
+                      _MiniScorePill(text: match.tipLabel, color: KickMindTheme.primary),
+                      _MiniScorePill(
+                        text: 'Q ${oddsRelevance.score.finalScore.toStringAsFixed(0)}',
+                        color: scoreColor,
+                      ),
+                      _MiniScorePill(
+                        text: match.odds.toStringAsFixed(2),
+                        color: Colors.indigo,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -925,6 +1618,7 @@ class _CompactTipCard extends StatelessWidget {
     );
   }
 }
+
 
 class _RankBadge extends StatelessWidget {
   final int rank;
@@ -951,35 +1645,6 @@ class _RankBadge extends StatelessWidget {
           color: isTop ? Colors.white : KickMindTheme.primary,
           fontWeight: FontWeight.w900,
           fontSize: 13,
-        ),
-      ),
-    );
-  }
-}
-
-class _TipPill extends StatelessWidget {
-  final String text;
-  final Color color;
-
-  const _TipPill({
-    required this.text,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.115),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w900,
         ),
       ),
     );

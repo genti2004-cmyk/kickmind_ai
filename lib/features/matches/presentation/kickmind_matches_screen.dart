@@ -190,17 +190,21 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
             final loading = snapshot.connectionState == ConnectionState.waiting;
             final rawMatches = snapshot.data ?? <FootballMatch>[];
             final matches = _applyFilter(rawMatches);
-            final rankedMatches = [...matches]..sort(_scoreService.compareByFinalScore);
-            final premiumTips = rankedMatches.where((m) => _scoreService.score(m).isRecommended).toList();
-            final valueTips = rankedMatches.where((m) {
+            final displayMatches = [...matches]..sort(_compareByRadarQuality);
+            final oddsMatches = matches.where((m) => m.hasPlayableOdds).toList();
+            final allRankedMatches = [...matches]..sort(_compareByRadarQuality);
+            final premiumTips = allRankedMatches.where((m) => _scoreService.score(m).isRecommended).toList();
+            final valueTips = allRankedMatches.where((m) {
               final score = _scoreService.score(m);
               return score.isValueBet && !score.isRecommended && !score.isNoBet;
             }).toList();
-            final visibleTopTips = rankedMatches.where((m) => !_scoreService.score(m).isNoBet).take(5).toList();
-            final topPick = premiumTips.isNotEmpty ? premiumTips.first : null;
-            final valuePick = valueTips.isNotEmpty ? valueTips.first : _bestValuePick(matches);
+            final visibleTopTips = allRankedMatches.where((m) => !_scoreService.score(m).isNoBet).take(5).toList();
+            final topPick = premiumTips.isNotEmpty
+                ? premiumTips.first
+                : _bestDisplayPick(allRankedMatches);
+            final valuePick = valueTips.isNotEmpty ? valueTips.first : _bestValuePick(oddsMatches);
             final strongCount = premiumTips.length;
-            final valueCount = rankedMatches.where((m) => _scoreService.score(m).isValueBet).length;
+            final valueCount = allRankedMatches.where((m) => _scoreService.score(m).isValueBet).length;
             final avgFinal = matches.isEmpty
                 ? 0
                 : (matches.fold<double>(0, (sum, m) => sum + _scoreService.score(m).finalScore) / matches.length).round();
@@ -217,6 +221,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
                   _StartHero(
                     rangeLabel: _range.label,
                     matchCount: matches.length,
+                    oddsCount: oddsMatches.length,
                     avgFinal: avgFinal,
                     strongCount: strongCount,
                     valueCount: valueCount,
@@ -310,16 +315,22 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
 
                   _SectionHeader(
                     title: _range.label,
-                    subtitle: '${matches.length} Spiele gefunden',
+                    subtitle: '${matches.length} echte Spiele · ${oddsMatches.length} mit passender Quote',
                     actionLabel: _activeFilter == null ? 'Filter' : 'Reset',
                     onActionTap: _activeFilter == null ? () => _openFilter(rawMatches) : _resetFilter,
+                  ),
+                  const SizedBox(height: 10),
+                  _MatchSourceInfo(
+                    totalCount: matches.length,
+                    oddsCount: oddsMatches.length,
+                    filtered: _activeFilter != null,
                   ),
                   const SizedBox(height: 10),
 
                   if (matches.isEmpty)
                     const _EmptyState()
                   else
-                    ...matches.map(
+                    ...displayMatches.map(
                           (match) => MatchCard(
                         match: match,
                         onTap: () => _openDetail(match),
@@ -359,6 +370,30 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
     return candidates.isEmpty ? null : candidates.first;
   }
 
+  FootballMatch? _bestDisplayPick(List<FootballMatch> matches) {
+    final candidates = matches.where((m) => !_scoreService.score(m).isNoBet).toList();
+    return candidates.isEmpty ? null : candidates.first;
+  }
+
+  int _compareByRadarQuality(FootballMatch a, FootballMatch b) {
+    final quality = _radarQualityScore(b).compareTo(_radarQualityScore(a));
+    if (quality != 0) return quality;
+
+    final kickoff = a.kickoff.compareTo(b.kickoff);
+    if (kickoff != 0) return kickoff;
+
+    return a.teamsLabel.compareTo(b.teamsLabel);
+  }
+
+  double _radarQualityScore(FootballMatch match) {
+    final score = _scoreService.score(match);
+    final oddsBoost = match.hasPlayableOdds ? 8.0 : 0.0;
+    final valueBoost = score.isValueBet ? 6.0 : 0.0;
+    final premiumBoost = score.isRecommended ? 9.0 : 0.0;
+    final riskPenalty = score.isNoBet ? -8.0 : 0.0;
+    return score.finalScore + oddsBoost + valueBoost + premiumBoost + riskPenalty;
+  }
+
   bool _isValueCandidate(FootballMatch match) {
     return _scoreService.score(match).isValueBet;
   }
@@ -384,6 +419,7 @@ class _KickMindMatchesScreenState extends State<KickMindMatchesScreen> {
 class _StartHero extends StatelessWidget {
   final String rangeLabel;
   final int matchCount;
+  final int oddsCount;
   final int avgFinal;
   final int strongCount;
   final int valueCount;
@@ -393,6 +429,7 @@ class _StartHero extends StatelessWidget {
   const _StartHero({
     required this.rangeLabel,
     required this.matchCount,
+    required this.oddsCount,
     required this.avgFinal,
     required this.strongCount,
     required this.valueCount,
@@ -444,7 +481,9 @@ class _StartHero extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$rangeLabel · $matchCount Spiele · Ø Final $avgFinal',
+                      '$rangeLabel · $matchCount echte Spiele · $oddsCount mit echter Quote',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w700),
                     ),
                   ],
@@ -835,6 +874,87 @@ class _SectionHeader extends StatelessWidget {
         if (actionLabel != null && onActionTap != null)
           TextButton(onPressed: onActionTap, child: Text(actionLabel!)),
       ],
+    );
+  }
+}
+
+
+class _MatchSourceInfo extends StatelessWidget {
+  final int totalCount;
+  final int oddsCount;
+  final bool filtered;
+
+  const _MatchSourceInfo({
+    required this.totalCount,
+    required this.oddsCount,
+    required this.filtered,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fixtureOnly = (totalCount - oddsCount).clamp(0, totalCount);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      decoration: BoxDecoration(
+        color: KickMindTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withOpacity(0.05)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.035),
+            blurRadius: 12,
+            offset: const Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: KickMindTheme.primary.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(
+                  Icons.verified_rounded,
+                  color: KickMindTheme.primary,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  filtered ? 'Gefilterte echte Spiele' : 'Echte Spiele aus der Matchquelle',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: KickMindTheme.textDark,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _Badge(text: '$totalCount Spiele', color: KickMindTheme.primary),
+              _Badge(text: '$oddsCount echte Quote', color: KickMindTheme.success),
+              _Badge(text: '$fixtureOnly Spielplan', color: Colors.blueGrey),
+              if (filtered) const _Badge(text: 'Filter aktiv', color: KickMindTheme.warning),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

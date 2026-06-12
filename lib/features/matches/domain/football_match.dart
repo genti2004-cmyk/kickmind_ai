@@ -21,6 +21,8 @@ class FootballMatch {
   final int aiScore;
   final String riskLevel;
   final double odds;
+  final bool hasRealOdds;
+  final String? realOddsBookmaker;
   final int homeFormScore;
   final int awayFormScore;
   final int goalsScore;
@@ -43,6 +45,8 @@ class FootballMatch {
     required this.aiScore,
     required this.riskLevel,
     required this.odds,
+    this.hasRealOdds = false,
+    this.realOddsBookmaker,
     required this.homeFormScore,
     required this.awayFormScore,
     required this.goalsScore,
@@ -65,6 +69,8 @@ class FootballMatch {
       'aiScore': aiScore,
       'riskLevel': riskLevel,
       'odds': odds,
+      'hasRealOdds': hasRealOdds,
+      'realOddsBookmaker': realOddsBookmaker,
       'homeFormScore': homeFormScore,
       'awayFormScore': awayFormScore,
       'goalsScore': goalsScore,
@@ -91,7 +97,9 @@ class FootballMatch {
       tipLabel: json['tipLabel']?.toString() ?? '1',
       aiScore: int.tryParse(json['aiScore']?.toString() ?? '') ?? 0,
       riskLevel: json['riskLevel']?.toString() ?? 'Mittel',
-      odds: (json['odds'] as num?)?.toDouble() ?? double.tryParse(json['odds']?.toString() ?? '') ?? 1.0,
+      odds: (json['odds'] as num?)?.toDouble() ?? double.tryParse(json['odds']?.toString() ?? '') ?? 0.0,
+      hasRealOdds: json['hasRealOdds'] == true || json['hasRealOdds']?.toString() == 'true',
+      realOddsBookmaker: json['realOddsBookmaker']?.toString(),
       homeFormScore: int.tryParse(json['homeFormScore']?.toString() ?? '') ?? 50,
       awayFormScore: int.tryParse(json['awayFormScore']?.toString() ?? '') ?? 50,
       goalsScore: int.tryParse(json['goalsScore']?.toString() ?? '') ?? 50,
@@ -99,7 +107,9 @@ class FootballMatch {
     );
   }
 
-  bool get isStrongTip => aiScore >= 72 && riskLevel.toLowerCase() != 'hoch' && riskLevel.toLowerCase() != 'high';
+  bool get hasPlayableOdds => hasRealOdds && odds > 1.0;
+
+  bool get isStrongTip => hasPlayableOdds && aiScore >= 72 && riskLevel.toLowerCase() != 'hoch' && riskLevel.toLowerCase() != 'high';
 
   String get riskLabel => riskLevel;
 
@@ -132,6 +142,8 @@ class FootballMatch {
     int? aiScore,
     String? riskLevel,
     double? odds,
+    bool? hasRealOdds,
+    String? realOddsBookmaker,
     int? homeFormScore,
     int? awayFormScore,
     int? goalsScore,
@@ -151,6 +163,8 @@ class FootballMatch {
       aiScore: aiScore ?? this.aiScore,
       riskLevel: riskLevel ?? this.riskLevel,
       odds: odds ?? this.odds,
+      hasRealOdds: hasRealOdds ?? this.hasRealOdds,
+      realOddsBookmaker: realOddsBookmaker ?? this.realOddsBookmaker,
       homeFormScore: homeFormScore ?? this.homeFormScore,
       awayFormScore: awayFormScore ?? this.awayFormScore,
       goalsScore: goalsScore ?? this.goalsScore,

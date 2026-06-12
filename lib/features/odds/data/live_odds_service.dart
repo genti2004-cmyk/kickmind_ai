@@ -159,6 +159,140 @@ class LiveOddsService {
     return sorted;
   }
 
+
+  Future<List<LiveOdds>> fetchLiveOddsForRange({
+    required DateTime start,
+    required int days,
+    bool forceRefresh = false,
+  }) async {
+    final normalizedStart = _dateOnly(start);
+    final safeDays = days.clamp(1, 8).toInt();
+    final rangeEnd = normalizedStart.add(Duration(days: safeDays - 1));
+    final rangeText = '${_formatDate(normalizedStart)} bis ${_formatDate(rangeEnd)}';
+    final cacheKey = 'range_${_formatDate(normalizedStart)}_$safeDays';
+    final now = DateTime.now();
+
+    if (!ApiConfig.hasFootballApiKey) {
+      lastDiagnostics = LiveOddsFetchDiagnostics(
+        checkedAt: now,
+        checkedDateRange: rangeText,
+        requestedDays: safeDays,
+        checkedDatesCount: 0,
+        foundOddsDate: null,
+        hasApiKey: false,
+        usedCache: false,
+        forceRefresh: forceRefresh,
+        httpStatusCode: null,
+        rawResponseCount: 0,
+        parsedOddsCount: 0,
+        visibleOddsCount: 0,
+        message: 'API-Key fehlt in ApiConfig.',
+      );
+      return <LiveOdds>[];
+    }
+
+    if (!forceRefresh && _cache.containsKey(cacheKey)) {
+      final cachedAt = _cacheTime[cacheKey];
+      final cached = _cache[cacheKey];
+      if (cachedAt != null &&
+          cached != null &&
+          cached.isNotEmpty &&
+          now.difference(cachedAt) < _cacheDuration) {
+        lastDiagnostics = LiveOddsFetchDiagnostics(
+          checkedAt: now,
+          checkedDateRange: rangeText,
+          requestedDays: safeDays,
+          checkedDatesCount: 0,
+          foundOddsDate: null,
+          hasApiKey: true,
+          usedCache: true,
+          forceRefresh: forceRefresh,
+          httpStatusCode: 200,
+          rawResponseCount: cached.length,
+          parsedOddsCount: cached.length,
+          visibleOddsCount: cached.length,
+          message: 'Top-Tips-Quoten aus Cache geladen.',
+        );
+        return List<LiveOdds>.from(cached);
+      }
+    }
+
+    var rawResponseCount = 0;
+    var parsedOddsCount = 0;
+    var checkedDatesCount = 0;
+    int? lastStatusCode;
+    String? firstOddsDate;
+    final notes = <String>[];
+    final result = <LiveOdds>[];
+
+    for (var offset = 0; offset < safeDays; offset++) {
+      final day = normalizedStart.add(Duration(days: offset));
+      checkedDatesCount++;
+      final dayResult = await _fetchOddsForDateDetailed(day);
+      rawResponseCount += dayResult.rawResponseCount;
+      parsedOddsCount += dayResult.odds.length;
+      lastStatusCode = dayResult.statusCode ?? lastStatusCode;
+
+      if (dayResult.message.trim().isNotEmpty) {
+        notes.add('${_formatDate(day)}: ${dayResult.message}');
+      }
+
+      if (dayResult.odds.isNotEmpty) {
+        firstOddsDate ??= _formatDate(day);
+        result.addAll(dayResult.odds);
+      }
+    }
+
+    final unique = <String, LiveOdds>{};
+    for (final odds in result) {
+      final key = odds.matchId.trim().isEmpty
+          ? '${odds.homeTeam}_${odds.awayTeam}_${odds.bookmaker}'
+          : odds.matchId.trim();
+      unique[key] = odds;
+    }
+
+    final sorted = unique.values.toList()
+      ..sort((a, b) {
+        final nameCompare = '${a.homeTeam} ${a.awayTeam}'.compareTo('${b.homeTeam} ${b.awayTeam}');
+        if (nameCompare != 0) return nameCompare;
+        return b.updatedAt.compareTo(a.updatedAt);
+      });
+
+    if (sorted.isNotEmpty) {
+      _cache[cacheKey] = List<LiveOdds>.from(sorted);
+      _cacheTime[cacheKey] = DateTime.now();
+    } else {
+      _cache.remove(cacheKey);
+      _cacheTime.remove(cacheKey);
+    }
+
+    lastDiagnostics = LiveOddsFetchDiagnostics(
+      checkedAt: DateTime.now(),
+      checkedDateRange: rangeText,
+      requestedDays: safeDays,
+      checkedDatesCount: checkedDatesCount,
+      foundOddsDate: firstOddsDate,
+      hasApiKey: true,
+      usedCache: false,
+      forceRefresh: forceRefresh,
+      httpStatusCode: lastStatusCode,
+      rawResponseCount: rawResponseCount,
+      parsedOddsCount: parsedOddsCount,
+      visibleOddsCount: sorted.length,
+      message: _buildDiagnosticsMessage(
+        statusCode: lastStatusCode,
+        rawResponseCount: rawResponseCount,
+        parsedOddsCount: parsedOddsCount,
+        visibleOddsCount: sorted.length,
+        foundOddsDate: firstOddsDate,
+        checkedDatesCount: checkedDatesCount,
+        notes: notes,
+      ),
+    );
+
+    return sorted;
+  }
+
   String _buildDiagnosticsMessage({
     required int? statusCode,
     required int rawResponseCount,

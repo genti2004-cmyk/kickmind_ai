@@ -111,6 +111,14 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                 valueInfo: valueInfo,
               ),
               const SizedBox(height: 16),
+              const _SectionTitle('Warum dieser Tipp?'),
+              const SizedBox(height: 10),
+              _DecisionReasonCard(
+                match: match,
+                breakdown: breakdown,
+                valueInfo: valueInfo,
+              ),
+              const SizedBox(height: 16),
               const _SectionTitle('Value Bet Erklärung'),
               const SizedBox(height: 10),
               _ValueExplanation(match: match, valueInfo: valueInfo),
@@ -253,6 +261,11 @@ class _Hero extends StatelessWidget {
               _WhiteBadge(text: 'Tipp ${match.tipLabel}'),
               _WhiteBadge(text: 'AI ${match.aiScore}%'),
               _WhiteBadge(text: 'Confidence ${breakdown.confidence}%'),
+              _WhiteBadge(
+                text: match.id.startsWith('odds_')
+                    ? 'Echte Quote'
+                    : 'Spielplan',
+              ),
             ],
           ),
         ],
@@ -316,6 +329,112 @@ class _Recommendation extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+
+class _DecisionReasonCard extends StatelessWidget {
+  final FootballMatch match;
+  final PredictionBreakdown breakdown;
+  final _ValueInfo valueInfo;
+
+  const _DecisionReasonCard({
+    required this.match,
+    required this.breakdown,
+    required this.valueInfo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final riskColor = KickMindTheme.riskColor(match.riskLevel);
+    final sourceText = match.id.startsWith('odds_')
+        ? 'Echte Bookmaker-Quote vorhanden.'
+        : 'Spielplan-Tipp ohne bestätigte Live-Quote.';
+    final edgeText = valueInfo.edgePercent >= 0
+        ? '+${valueInfo.edgePercent.toStringAsFixed(1)}%'
+        : '${valueInfo.edgePercent.toStringAsFixed(1)}%';
+
+    return _PremiumCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _mainDecisionText(),
+            style: const TextStyle(
+              color: Color(0xFF111827),
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              height: 1.22,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _ReviewLine(
+            title: 'Datenquelle',
+            text: sourceText,
+            icon: match.id.startsWith('odds_')
+                ? Icons.verified_rounded
+                : Icons.sports_soccer_rounded,
+            color: match.id.startsWith('odds_')
+                ? KickMindTheme.success
+                : KickMindTheme.primaryDark,
+          ),
+          const SizedBox(height: 12),
+          _ReviewLine(
+            title: 'Signal',
+            text: 'Tipp ${match.tipLabel} · AI ${match.aiScore}% · Confidence ${breakdown.confidence}%.',
+            icon: Icons.auto_awesome_rounded,
+            color: KickMindTheme.primary,
+          ),
+          const SizedBox(height: 12),
+          _ReviewLine(
+            title: 'Risiko & Value',
+            text: '${match.riskLevel} · Quote ${match.odds.toStringAsFixed(2)} · Edge $edgeText.',
+            icon: Icons.shield_rounded,
+            color: riskColor,
+          ),
+          const SizedBox(height: 12),
+          _ReviewLine(
+            title: 'Lesart',
+            text: _tipMeaningText(),
+            icon: Icons.lightbulb_rounded,
+            color: Colors.deepPurple,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _mainDecisionText() {
+    if (valueInfo.isValueBet && match.aiScore >= 70) {
+      return 'Starkes Value-Signal: Die AI-Bewertung liegt deutlich über der impliziten Quote.';
+    }
+
+    if (match.aiScore >= 70 && match.riskLevel.toLowerCase() != 'hoch') {
+      return 'Starkes Analyse-Signal: hohe AI-Bewertung mit kontrolliertem Risiko.';
+    }
+
+    if (match.aiScore >= 60) {
+      return 'Solider Ansatz: Der Tipp ist interessant, aber noch kein Premium-Signal.';
+    }
+
+    return 'Beobachten: Die Datenlage reicht aktuell nicht für ein starkes Signal.';
+  }
+
+  String _tipMeaningText() {
+    switch (match.tipType) {
+      case TipType.homeWin:
+        return 'Die Empfehlung setzt auf einen Vorteil des Heimteams gegenüber dem Auswärtsteam.';
+      case TipType.draw:
+        return 'Die Empfehlung sieht ein ausgeglichenes Spielbild mit Remis-Potenzial.';
+      case TipType.awayWin:
+        return 'Die Empfehlung bewertet das Auswärtsteam stärker als die Heimseite.';
+      case TipType.over25:
+        return 'Die Empfehlung erwartet ein eher torreiches Spiel mit mehr als 2,5 Toren.';
+      case TipType.under25:
+        return 'Die Empfehlung erwartet ein kontrollierteres Spiel mit weniger als 2,5 Toren.';
+      case TipType.btts:
+        return 'Die Empfehlung sieht gute Chancen, dass beide Teams treffen.';
+    }
   }
 }
 
