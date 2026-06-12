@@ -73,7 +73,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             );
           }
 
-          final ranked = [...(snapshot.data ?? <FootballMatch>[])]..sort(_compareByFinalScore);
+          final rawMatches = snapshot.data ?? <FootballMatch>[];
+          final ranked = _prepareRankedMatches(rawMatches);
 
           if (ranked.isEmpty) {
             return _AnalysisMessageState(
@@ -86,6 +87,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
           final buckets = _buildBuckets(ranked);
           final avgFinal = ranked.map(_finalScore).fold<double>(0, (a, b) => a + b) / ranked.length;
+          final topRanking = <FootballMatch>[
+            ...buckets.premium,
+            ...buckets.value,
+            ...buckets.watch,
+          ];
+          final visibleRanking = topRanking.isNotEmpty ? topRanking.take(5).toList() : ranked.take(5).toList();
 
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -143,13 +150,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                 _SectionTitle(
                   icon: Icons.auto_graph_rounded,
                   title: 'Finales Analyse-Ranking',
-                  subtitle: 'Kompaktes Ranking nach Final Score, Risiko und Value.',
+                  subtitle: 'Nur die stärksten Signale oben. No-Bet bleibt bewusst getrennt.',
                 ),
                 const SizedBox(height: 12),
-                ...ranked.take(5).map(
+                ...visibleRanking.map(
                       (match) => _AnalysisTipTile(
                     match: match,
-                    rank: ranked.indexOf(match) + 1,
+                    rank: visibleRanking.indexOf(match) + 1,
                     finalScore: _finalScore(match),
                     valueEdge: _valueEdge(match),
                     confidence: _confidence(match),
@@ -277,9 +284,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     }
 
     return _AnalysisBuckets(
-      premium: premium.take(7).toList(),
-      value: value.take(5).toList(),
-      watch: watch.take(7).toList(),
+      premium: premium,
+      value: value,
+      watch: watch,
       noBet: noBet,
     );
   }
@@ -306,17 +313,30 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   String _sourceLabel(FootballMatch match) {
-    return _hasRealBookmakerOdds(match) ? 'Echte Quote' : 'Spielplan';
+    final id = match.id.toLowerCase();
+    if (_hasRealBookmakerOdds(match)) return 'Echte Quote';
+    if (id.startsWith('espn_')) return 'ESPN';
+    if (id.startsWith('sportsdb_')) return 'TheSportsDB';
+    if (id.startsWith('fixture_')) return 'API-Football';
+    return 'Spielplan';
   }
 
   Color _sourceColor(FootballMatch match) {
-    return _hasRealBookmakerOdds(match) ? KickMindTheme.success : Colors.blueGrey;
+    final id = match.id.toLowerCase();
+    if (_hasRealBookmakerOdds(match)) return KickMindTheme.success;
+    if (id.startsWith('espn_')) return Colors.indigo;
+    if (id.startsWith('sportsdb_')) return Colors.blueGrey;
+    if (id.startsWith('fixture_')) return KickMindTheme.primaryDark;
+    return Colors.blueGrey;
   }
 
   String _analysisReason(FootballMatch match) {
     final decision = _scoreService.decision(match);
     final score = _scoreService.score(match);
-    final source = _hasRealBookmakerOdds(match) ? 'echte Bookmaker-Quote' : 'echte Spielplan-Daten';
+    final hasOdds = _hasRealBookmakerOdds(match);
+    final source = hasOdds
+        ? 'echter Bookmaker-Quote'
+        : 'echtem Spielplan (${_sourceLabel(match)})';
     final valueText = score.valueEdge >= 0
         ? '+${score.valueEdge.toStringAsFixed(1)}%'
         : '${score.valueEdge.toStringAsFixed(1)}%';
@@ -343,6 +363,18 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         break;
     }
 
+    if (!hasOdds) {
+      switch (decision.type) {
+        case TopTipDecisionType.premium:
+        case TopTipDecisionType.value:
+          return 'Analyse-Signal: $tipContext aus $source. Final ${score.finalScore.toStringAsFixed(1)}, Confidence ${score.confidence.toStringAsFixed(0)}%. Ohne echte Quote nur als Beobachtung werten.';
+        case TopTipDecisionType.watch:
+          return 'Beobachten: $tipContext ist anhand des Spielplans interessant. Keine echte Quote vorhanden, deshalb kein Premium-Wett-Tipp.';
+        case TopTipDecisionType.noBet:
+          return 'No Bet: Spiel ist echt, aber Score/Risiko/Confidence reichen ohne echte Quote nicht für einen Tipp.';
+      }
+    }
+
     switch (decision.type) {
       case TopTipDecisionType.premium:
         return 'Premium: $tipContext mit $source, Final ${score.finalScore.toStringAsFixed(1)}, Value $valueText und kontrolliertem Risiko.';
@@ -362,8 +394,54 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     );
   }
 
+  List<FootballMatch> _prepareRankedMatches(List<FootballMatch> matches) {
+    final filtered = matches
+        .where(_hasReadableTeams)
+        .toList();
+
+    filtered.sort(_compareByFinalScore);
+    return filtered;
+  }
+
+  bool _hasReadableTeams(FootballMatch match) {
+    return _isRealTeamName(match.homeTeam) && _isRealTeamName(match.awayTeam);
+  }
+
+  bool _isRealTeamName(String value) {
+    final text = value.trim();
+    if (text.isEmpty) return false;
+    final lower = text.toLowerCase();
+    if (RegExp(r'^(heimteam|auswärtsteam|auswaertsteam)\s*\d+$').hasMatch(lower)) {
+      return false;
+    }
+    if (RegExp(r'^\d+$').hasMatch(text)) return false;
+    return true;
+  }
+
   int _compareByFinalScore(FootballMatch a, FootballMatch b) {
+    final priorityCompare = _analysisPriorityScore(b).compareTo(_analysisPriorityScore(a));
+    if (priorityCompare != 0) return priorityCompare;
     return _scoreService.compareByFinalScore(a, b);
+  }
+
+  double _analysisPriorityScore(FootballMatch match) {
+    final score = _scoreService.score(match);
+    final decision = _scoreService.decision(match);
+    final hasOddsBoost = _hasRealBookmakerOdds(match) ? 7.0 : 0.0;
+    final sourceBoost = _sourceLabel(match) == 'ESPN'
+        ? 2.0
+        : _sourceLabel(match) == 'TheSportsDB'
+        ? 1.0
+        : 0.0;
+    final riskPenalty = _isHighRisk(match) ? 10.0 : 0.0;
+    final noBetPenalty = decision.type == TopTipDecisionType.noBet ? 20.0 : 0.0;
+    final watchPenalty = decision.type == TopTipDecisionType.watch ? 4.0 : 0.0;
+    return score.finalScore + hasOddsBoost + sourceBoost - riskPenalty - noBetPenalty - watchPenalty;
+  }
+
+  bool _isHighRisk(FootballMatch match) {
+    final risk = match.riskLevel.toLowerCase().trim();
+    return risk == 'hoch' || risk == 'high';
   }
 
   double _finalScore(FootballMatch match) {
@@ -518,7 +596,7 @@ class _AnalysisHero extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '$matchesCount Spiele · $premiumCount Premium · $valueCount Value · $watchCount Watch · $noBetCount No Bet',
+                      '$matchesCount Spiele · $premiumCount Premium · $valueCount Value · $watchCount Beobachten · $noBetCount No Bet',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.78),
                         fontWeight: FontWeight.w800,
@@ -906,7 +984,7 @@ class _RiskWarningTile extends StatelessWidget {
       icon: Icons.warning_amber_rounded,
       iconColor: KickMindTheme.danger,
       title: match.teamsLabel,
-      subtitle: '${match.riskLevel} · Final ${finalScore.toStringAsFixed(1)} · Quote ${match.odds.toStringAsFixed(2)}',
+      subtitle: 'No Bet · ${match.riskLevel} · Final ${finalScore.toStringAsFixed(1)} · nicht als Tipp übernehmen',
       onTap: onTap,
     );
   }
