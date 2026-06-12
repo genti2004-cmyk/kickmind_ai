@@ -145,7 +145,8 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
               const SizedBox(height: 16),
               const _SectionTitle('Gewinnsimulation'),
               const SizedBox(height: 10),
-              _PremiumCard(
+              _hasUsableRealOdds(match)
+                  ? _PremiumCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -170,7 +171,8 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                     ),
                   ],
                 ),
-              ),
+              )
+                  : const _NoOddsSimulationCard(),
               const SizedBox(height: 18),
               SizedBox(
                 width: double.infinity,
@@ -207,6 +209,9 @@ class _Hero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final verdict = _DetailVerdict.fromMatch(match, breakdown, valueInfo);
+    final source = _DataSourceInfo.fromMatch(match);
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -238,8 +243,11 @@ class _Hero extends StatelessWidget {
                   ),
                 ),
               ),
-              if (valueInfo.isValueBet)
+              _WhiteBadge(text: verdict.label),
+              if (valueInfo.isValueBet) ...[
+                const SizedBox(width: 6),
                 _WhiteBadge(text: '💰 VALUE'),
+              ],
             ],
           ),
           const SizedBox(height: 10),
@@ -261,11 +269,8 @@ class _Hero extends StatelessWidget {
               _WhiteBadge(text: 'Tipp ${match.tipLabel}'),
               _WhiteBadge(text: 'AI ${match.aiScore}%'),
               _WhiteBadge(text: 'Confidence ${breakdown.confidence}%'),
-              _WhiteBadge(
-                text: match.id.startsWith('odds_')
-                    ? 'Echte Quote'
-                    : 'Spielplan',
-              ),
+              _WhiteBadge(text: source.label),
+              _WhiteBadge(text: 'KickMind ${verdict.score.toStringAsFixed(0)}/100'),
             ],
           ),
         ],
@@ -287,7 +292,9 @@ class _Recommendation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scoreColor = KickMindTheme.scoreColor(match.aiScore);
+    final verdict = _DetailVerdict.fromMatch(match, breakdown, valueInfo);
+    final source = _DataSourceInfo.fromMatch(match);
+    final scoreColor = verdict.color;
     final riskColor = KickMindTheme.riskColor(match.riskLevel);
 
     return _PremiumCard(
@@ -318,9 +325,11 @@ class _Recommendation extends StatelessWidget {
               runSpacing: 8,
               children: [
                 _Badge(text: '${match.riskEmoji} ${match.riskLevel}', color: riskColor),
+                _Badge(text: source.label, color: source.color),
                 _Badge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: KickMindTheme.primaryDark),
                 _Badge(text: 'Confidence ${breakdown.confidence}%', color: KickMindTheme.accent),
-                _Badge(text: 'Score ${match.aiScore}/100', color: scoreColor),
+                _Badge(text: 'KickMind ${verdict.score.toStringAsFixed(0)}/100', color: scoreColor),
+                _Badge(text: verdict.label, color: verdict.color),
                 if (valueInfo.isValueBet)
                   _Badge(text: 'Value +${valueInfo.edgePercent.toStringAsFixed(1)}%', color: KickMindTheme.success),
               ],
@@ -346,10 +355,10 @@ class _DecisionReasonCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final verdict = _DetailVerdict.fromMatch(match, breakdown, valueInfo);
+    final source = _DataSourceInfo.fromMatch(match);
     final riskColor = KickMindTheme.riskColor(match.riskLevel);
-    final sourceText = match.id.startsWith('odds_')
-        ? 'Echte Bookmaker-Quote vorhanden.'
-        : 'Spielplan-Tipp ohne bestätigte Live-Quote.';
+    final sourceText = source.description;
     final edgeText = valueInfo.edgePercent >= 0
         ? '+${valueInfo.edgePercent.toStringAsFixed(1)}%'
         : '${valueInfo.edgePercent.toStringAsFixed(1)}%';
@@ -371,17 +380,13 @@ class _DecisionReasonCard extends StatelessWidget {
           _ReviewLine(
             title: 'Datenquelle',
             text: sourceText,
-            icon: match.id.startsWith('odds_')
-                ? Icons.verified_rounded
-                : Icons.sports_soccer_rounded,
-            color: match.id.startsWith('odds_')
-                ? KickMindTheme.success
-                : KickMindTheme.primaryDark,
+            icon: source.icon,
+            color: source.color,
           ),
           const SizedBox(height: 12),
           _ReviewLine(
             title: 'Signal',
-            text: 'Tipp ${match.tipLabel} · AI ${match.aiScore}% · Confidence ${breakdown.confidence}%.',
+            text: 'Tipp ${match.tipLabel} · KickMind ${verdict.score.toStringAsFixed(0)}/100 · AI ${match.aiScore}% · Confidence ${breakdown.confidence}%.',
             icon: Icons.auto_awesome_rounded,
             color: KickMindTheme.primary,
           ),
@@ -391,6 +396,13 @@ class _DecisionReasonCard extends StatelessWidget {
             text: '${match.riskLevel} · Quote ${match.odds.toStringAsFixed(2)} · Edge $edgeText.',
             icon: Icons.shield_rounded,
             color: riskColor,
+          ),
+          const SizedBox(height: 12),
+          _ReviewLine(
+            title: 'Entscheidung',
+            text: verdict.explanation,
+            icon: verdict.icon,
+            color: verdict.color,
           ),
           const SizedBox(height: 12),
           _ReviewLine(
@@ -405,19 +417,8 @@ class _DecisionReasonCard extends StatelessWidget {
   }
 
   String _mainDecisionText() {
-    if (valueInfo.isValueBet && match.aiScore >= 70) {
-      return 'Starkes Value-Signal: Die AI-Bewertung liegt deutlich über der impliziten Quote.';
-    }
-
-    if (match.aiScore >= 70 && match.riskLevel.toLowerCase() != 'hoch') {
-      return 'Starkes Analyse-Signal: hohe AI-Bewertung mit kontrolliertem Risiko.';
-    }
-
-    if (match.aiScore >= 60) {
-      return 'Solider Ansatz: Der Tipp ist interessant, aber noch kein Premium-Signal.';
-    }
-
-    return 'Beobachten: Die Datenlage reicht aktuell nicht für ein starkes Signal.';
+    final verdict = _DetailVerdict.fromMatch(match, breakdown, valueInfo);
+    return verdict.headline;
   }
 
   String _tipMeaningText() {
@@ -446,6 +447,34 @@ class _ValueExplanation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final source = _DataSourceInfo.fromMatch(match);
+    if (!source.hasRealBookmakerOdds || match.odds <= 1.05) {
+      return _PremiumCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Keine echte Quote verfügbar',
+              style: TextStyle(
+                color: KickMindTheme.primaryDark,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '${source.description} Deshalb wird dieser Eintrag als Analyse-/Beobachten-Spiel bewertet und nicht als echter Wetttipp mit Value-Berechnung verkauft.',
+              style: TextStyle(
+                color: Colors.grey.shade800,
+                height: 1.4,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final edgeText = valueInfo.edgePercent >= 0
         ? '+${valueInfo.edgePercent.toStringAsFixed(1)}%'
         : '${valueInfo.edgePercent.toStringAsFixed(1)}%';
@@ -828,6 +857,8 @@ class _ProShortReview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final verdict = _DetailVerdict.fromMatch(match, breakdown, valueInfo);
+    final source = _DataSourceInfo.fromMatch(match);
     final riskColor = KickMindTheme.riskColor(match.riskLevel);
     final edgeText = valueInfo.edgePercent >= 0
         ? '+${valueInfo.edgePercent.toStringAsFixed(1)}%'
@@ -839,14 +870,14 @@ class _ProShortReview extends StatelessWidget {
         children: [
           _ReviewLine(
             title: 'Empfehlung',
-            text: '${match.tipLabel} · AI ${match.aiScore}% · Confidence ${breakdown.confidence}%',
+            text: '${match.tipLabel} · ${verdict.label} · KickMind ${verdict.score.toStringAsFixed(0)}/100 · Confidence ${breakdown.confidence}%',
             icon: Icons.auto_graph_rounded,
             color: KickMindTheme.primary,
           ),
           const SizedBox(height: 12),
           _ReviewLine(
             title: 'Warum?',
-            text: 'Finaler Score aus Form, Heim/Auswärts, Tore-Trend, H2H und Tabellenlage.',
+            text: '${source.label}: ${verdict.explanation}',
             icon: Icons.insights_rounded,
             color: KickMindTheme.accent,
           ),
@@ -1018,6 +1049,202 @@ class _SectionTitle extends StatelessWidget {
         fontSize: 18,
         fontWeight: FontWeight.w900,
       ),
+    );
+  }
+}
+
+
+bool _hasUsableRealOdds(FootballMatch match) {
+  final source = _DataSourceInfo.fromMatch(match);
+  return source.hasRealBookmakerOdds && match.odds > 1.05;
+}
+
+class _NoOddsSimulationCard extends StatelessWidget {
+  const _NoOddsSimulationCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return _PremiumCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.blueGrey.withOpacity(0.11),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(
+              Icons.info_outline_rounded,
+              color: Colors.blueGrey,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Keine Gewinnsimulation: Für dieses Spiel liegt aktuell keine echte, spielbare Bookmaker-Quote vor. Die App zeigt deshalb Analyse und Beobachtung, aber keinen künstlichen Einsatz-/Gewinnwert.',
+              style: TextStyle(
+                color: Colors.grey.shade800,
+                height: 1.38,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DataSourceInfo {
+  final bool hasRealBookmakerOdds;
+  final String label;
+  final String description;
+  final IconData icon;
+  final Color color;
+
+  const _DataSourceInfo({
+    required this.hasRealBookmakerOdds,
+    required this.label,
+    required this.description,
+    required this.icon,
+    required this.color,
+  });
+
+  factory _DataSourceInfo.fromMatch(FootballMatch match) {
+    final bookmaker = match.realOddsBookmaker?.trim();
+    final hasRealOdds = match.hasRealOdds ||
+        match.id.startsWith('odds_') ||
+        (bookmaker != null && bookmaker.isNotEmpty && bookmaker != 'null');
+
+    if (hasRealOdds && match.odds > 1.05) {
+      return _DataSourceInfo(
+        hasRealBookmakerOdds: true,
+        label: bookmaker == null || bookmaker.isEmpty || bookmaker == 'null'
+            ? 'Echte Quote'
+            : bookmaker,
+        description: bookmaker == null || bookmaker.isEmpty || bookmaker == 'null'
+            ? 'Echte Bookmaker-Quote vorhanden. Value und Gewinnsimulation dürfen bewertet werden.'
+            : 'Echte Bookmaker-Quote von $bookmaker vorhanden. Value und Gewinnsimulation dürfen bewertet werden.',
+        icon: Icons.verified_rounded,
+        color: KickMindTheme.success,
+      );
+    }
+
+    final sourceLabel = match.id.startsWith('espn_')
+        ? 'ESPN Spielplan'
+        : match.id.startsWith('sportsdb_')
+        ? 'TheSportsDB Spielplan'
+        : 'Spielplan';
+
+    return _DataSourceInfo(
+      hasRealBookmakerOdds: false,
+      label: sourceLabel,
+      description: 'Echtes Spiel aus $sourceLabel, aber ohne bestätigte passende Live-Quote. Bewertung ist Analyse/Watchlist, kein echter Wett-Tipp.',
+      icon: Icons.sports_soccer_rounded,
+      color: Colors.blueGrey,
+    );
+  }
+}
+
+class _DetailVerdict {
+  final double score;
+  final String label;
+  final String headline;
+  final String explanation;
+  final IconData icon;
+  final Color color;
+
+  const _DetailVerdict({
+    required this.score,
+    required this.label,
+    required this.headline,
+    required this.explanation,
+    required this.icon,
+    required this.color,
+  });
+
+  factory _DetailVerdict.fromMatch(
+      FootballMatch match,
+      PredictionBreakdown breakdown,
+      _ValueInfo valueInfo,
+      ) {
+    final source = _DataSourceInfo.fromMatch(match);
+    final risk = match.riskLevel.toLowerCase().trim();
+    final highRisk = risk == 'hoch' || risk == 'high';
+    final mediumRisk = risk == 'mittel' || risk == 'medium';
+    final formBlend = ((match.homeFormScore + match.awayFormScore + match.goalsScore) / 3).clamp(0, 100).toDouble();
+
+    var score = match.aiScore * 0.48 +
+        breakdown.confidence * 0.22 +
+        formBlend * 0.18 +
+        breakdown.tableScore * 0.06 +
+        breakdown.headToHeadScore * 0.06;
+
+    if (source.hasRealBookmakerOdds) score += 7;
+    if (valueInfo.isValueBet) score += 8;
+    if (valueInfo.edgePercent >= 8) score += 4;
+    if (highRisk) score -= 14;
+    if (mediumRisk) score -= 4;
+    if (!source.hasRealBookmakerOdds) score -= 6;
+    if (match.odds <= 1.05) score -= 5;
+
+    final normalized = score.clamp(0, 100).toDouble();
+
+    if (!source.hasRealBookmakerOdds && normalized < 64) {
+      return _DetailVerdict(
+        score: normalized,
+        label: 'Beobachten',
+        headline: 'Beobachten: Echtes Spiel, aber ohne echte Quote und ohne klares Premium-Signal.',
+        explanation: 'Solange keine echte Bookmaker-Quote vorliegt, bleibt dieser Eintrag eine Analyse-/Watchlist-Auswahl.',
+        icon: Icons.visibility_rounded,
+        color: Colors.blueGrey,
+      );
+    }
+
+    if (normalized >= 78 && valueInfo.isValueBet && !highRisk) {
+      return _DetailVerdict(
+        score: normalized,
+        label: 'Premium',
+        headline: 'Premium-Signal: Score, Value und Risiko passen überdurchschnittlich gut zusammen.',
+        explanation: 'Hoher KickMind Score, positiver Value Edge und kontrolliertes Risiko sprechen für eine starke Auswahl.',
+        icon: Icons.workspace_premium_rounded,
+        color: KickMindTheme.success,
+      );
+    }
+
+    if (normalized >= 70 && !highRisk) {
+      return _DetailVerdict(
+        score: normalized,
+        label: 'Stark',
+        headline: 'Starkes Analyse-Signal: hohe Bewertung mit vertretbarem Risiko.',
+        explanation: 'AI, Confidence und Form-/Trendwerte ergeben ein klares Signal, aber ohne Garantie.',
+        icon: Icons.auto_awesome_rounded,
+        color: KickMindTheme.primary,
+      );
+    }
+
+    if (normalized >= 58 && !highRisk) {
+      return _DetailVerdict(
+        score: normalized,
+        label: 'Solide',
+        headline: 'Solider Ansatz: interessant, aber noch kein Top-Premium-Signal.',
+        explanation: 'Der Tipp ist analysierbar, sollte aber eher selektiv oder als Beobachtung genutzt werden.',
+        icon: Icons.check_circle_outline_rounded,
+        color: Colors.deepPurple,
+      );
+    }
+
+    return _DetailVerdict(
+      score: normalized,
+      label: 'No Bet',
+      headline: 'No Bet: Die Datenlage reicht aktuell nicht für eine starke Empfehlung.',
+      explanation: 'Score, Risiko, Quote oder Datenquelle sind zu schwach. Dieses Spiel besser nicht als Top-Tipp behandeln.',
+      icon: Icons.block_rounded,
+      color: Colors.orange.shade800,
     );
   }
 }
