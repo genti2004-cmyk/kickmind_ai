@@ -39,6 +39,8 @@ class FootballApiService {
   // weiter belastet und die App bleibt stabil.
   static bool _apiFootballDailyLimitReached = false;
   static String? _apiFootballDailyLimitDateKey;
+  static bool _apiFootballDailyLimitLoadedFromDisk = false;
+  static const String _apiFootballDailyLimitPrefsKey = 'kickmind_api_football_daily_limit_date_v1';
 
   static const List<_ApiLeagueRef> _supplementalApiFootballLeagues = <_ApiLeagueRef>[
     _ApiLeagueRef(1),
@@ -155,6 +157,8 @@ class FootballApiService {
     if (!ApiConfig.hasFootballApiKey) {
       return _loadPersistedRange(key, normalizedStart, safeDays);
     }
+
+    await _restoreApiFootballDailyLimitIfNeeded();
 
     final fixtureMatches = <FootballMatch>[];
     final oddsByFixtureId = <int, _OddsSnapshot>{};
@@ -1483,6 +1487,40 @@ class FootballApiService {
         .replaceAll(RegExp(r'^_|_$'), '');
   }
 
+  Future<void> _restoreApiFootballDailyLimitIfNeeded() async {
+    if (_apiFootballDailyLimitLoadedFromDisk) return;
+    _apiFootballDailyLimitLoadedFromDisk = true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final todayKey = _formatDate(DateTime.now());
+      final savedDateKey = prefs.getString(_apiFootballDailyLimitPrefsKey);
+
+      if (savedDateKey == todayKey) {
+        _apiFootballDailyLimitReached = true;
+        _apiFootballDailyLimitDateKey = todayKey;
+        // ignore: avoid_print
+        print('API-FOOTBALL LIMIT FAST SKIP persisted $todayKey');
+        return;
+      }
+
+      if (savedDateKey != null && savedDateKey != todayKey) {
+        await prefs.remove(_apiFootballDailyLimitPrefsKey);
+      }
+    } catch (_) {
+      // Persistenter Limit-Cache darf den normalen Datenfluss nie blockieren.
+    }
+  }
+
+  Future<void> _persistApiFootballDailyLimit(String todayKey) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_apiFootballDailyLimitPrefsKey, todayKey);
+    } catch (_) {
+      // Persistenter Limit-Cache ist nur Performance-Schutz.
+    }
+  }
+
   bool _isApiFootballDailyLimitBlocked() {
     if (!_apiFootballDailyLimitReached) return false;
 
@@ -1509,8 +1547,10 @@ class FootballApiService {
 
     if (!isLimit) return false;
 
+    final todayKey = _formatDate(DateTime.now());
     _apiFootballDailyLimitReached = true;
-    _apiFootballDailyLimitDateKey = _formatDate(DateTime.now());
+    _apiFootballDailyLimitDateKey = todayKey;
+    _persistApiFootballDailyLimit(todayKey);
 
     // ignore: avoid_print
     print("API-FOOTBALL DAILY LIMIT REACHED ($context): ${errors.values.join(' | ')}");

@@ -73,8 +73,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             );
           }
 
-          final rawMatches = snapshot.data ?? <FootballMatch>[];
-          final ranked = _prepareRankedMatches(rawMatches);
+          final ranked = [...(snapshot.data ?? <FootballMatch>[])]..sort(_compareByFinalScore);
 
           if (ranked.isEmpty) {
             return _AnalysisMessageState(
@@ -87,12 +86,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
           final buckets = _buildBuckets(ranked);
           final avgFinal = ranked.map(_finalScore).fold<double>(0, (a, b) => a + b) / ranked.length;
-          final topRanking = <FootballMatch>[
-            ...buckets.premium,
-            ...buckets.value,
-            ...buckets.watch,
-          ];
-          final visibleRanking = topRanking.isNotEmpty ? topRanking.take(5).toList() : ranked.take(5).toList();
 
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -150,13 +143,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                 _SectionTitle(
                   icon: Icons.auto_graph_rounded,
                   title: 'Finales Analyse-Ranking',
-                  subtitle: 'Nur die stärksten Signale oben. No-Bet bleibt bewusst getrennt.',
+                  subtitle: 'Echte Quoten zuerst. Spiele ohne Quote bleiben als Beobachtung sichtbar.',
                 ),
                 const SizedBox(height: 12),
-                ...visibleRanking.map(
+                ...ranked.take(5).map(
                       (match) => _AnalysisTipTile(
                     match: match,
-                    rank: visibleRanking.indexOf(match) + 1,
+                    rank: ranked.indexOf(match) + 1,
                     finalScore: _finalScore(match),
                     valueEdge: _valueEdge(match),
                     confidence: _confidence(match),
@@ -164,6 +157,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                     statusColor: _categoryColor(match),
                     sourceLabel: _sourceLabel(match),
                     sourceColor: _sourceColor(match),
+                    quoteLabel: _quoteLabel(match),
+                    quoteColor: _quoteColor(match),
                     reason: _analysisReason(match),
                     onTap: () => _openDetail(match),
                   ),
@@ -172,8 +167,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                   const SizedBox(height: 18),
                   _SectionTitle(
                     icon: Icons.workspace_premium_rounded,
-                    title: 'Premium Top Tipps',
-                    subtitle: 'Stärkste Kombination aus Score, Risiko und Quote.',
+                    title: 'Premium Signale mit Quote',
+                    subtitle: 'Nur Spiele mit echter Bookmaker-Quote und starkem Score.',
                   ),
                   const SizedBox(height: 12),
                   ...buckets.premium.take(4).map(
@@ -185,6 +180,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                       statusColor: KickMindTheme.primary,
                       sourceLabel: _sourceLabel(match),
                       sourceColor: _sourceColor(match),
+                      quoteLabel: _quoteLabel(match),
+                      quoteColor: _quoteColor(match),
                       reason: _analysisReason(match),
                       onTap: () => _openDetail(match),
                     ),
@@ -194,8 +191,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                   const SizedBox(height: 18),
                   _SectionTitle(
                     icon: Icons.trending_up_rounded,
-                    title: 'Value Chancen',
-                    subtitle: 'Positive Edge, aber noch nicht Premium.',
+                    title: 'Value Chancen mit Quote',
+                    subtitle: 'Nur mit echter Quote. Keine Spielplan-Quote wird erfunden.',
                   ),
                   const SizedBox(height: 12),
                   ...buckets.value.take(4).map(
@@ -207,6 +204,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                       statusColor: KickMindTheme.success,
                       sourceLabel: _sourceLabel(match),
                       sourceColor: _sourceColor(match),
+                      quoteLabel: _quoteLabel(match),
+                      quoteColor: _quoteColor(match),
                       reason: _analysisReason(match),
                       onTap: () => _openDetail(match),
                     ),
@@ -216,8 +215,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                   const SizedBox(height: 18),
                   _SectionTitle(
                     icon: Icons.visibility_rounded,
-                    title: 'Beobachten',
-                    subtitle: 'Solide Ansätze mit Beobachtungsstatus.',
+                    title: 'Beobachten / ohne Quote',
+                    subtitle: 'Solide Spielplan-Signale, aber noch kein echter Wett-Tipp.',
                   ),
                   const SizedBox(height: 12),
                   ...buckets.watch.take(4).map(
@@ -229,6 +228,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                       statusColor: KickMindTheme.primaryDark,
                       sourceLabel: _sourceLabel(match),
                       sourceColor: _sourceColor(match),
+                      quoteLabel: _quoteLabel(match),
+                      quoteColor: _quoteColor(match),
                       reason: _analysisReason(match),
                       onTap: () => _openDetail(match),
                     ),
@@ -246,6 +247,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                         (match) => _RiskWarningTile(
                       match: match,
                       finalScore: _finalScore(match),
+                      quoteLabel: _quoteLabel(match),
+                      quoteColor: _quoteColor(match),
                       onTap: () => _openDetail(match),
                     ),
                   ),
@@ -267,6 +270,18 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     for (final match in ranked) {
       final decision = _scoreService.decision(match);
 
+      // Wichtig: Analyse darf Spielplan-Spiele ohne echte Quote anzeigen,
+      // aber nicht als Premium/Value-Wett-Tipp verkaufen.
+      // Ohne echte Bookmaker-Quote ist ein Match maximal Beobachtung.
+      if (!_hasUsableQuote(match)) {
+        if (decision.type == TopTipDecisionType.noBet) {
+          noBet.add(match);
+        } else {
+          watch.add(match);
+        }
+        continue;
+      }
+
       switch (decision.type) {
         case TopTipDecisionType.premium:
           premium.add(match);
@@ -284,9 +299,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     }
 
     return _AnalysisBuckets(
-      premium: premium,
-      value: value,
-      watch: watch,
+      premium: premium.take(7).toList(),
+      value: value.take(5).toList(),
+      watch: watch.take(10).toList(),
       noBet: noBet,
     );
   }
@@ -313,30 +328,32 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   String _sourceLabel(FootballMatch match) {
-    final id = match.id.toLowerCase();
-    if (_hasRealBookmakerOdds(match)) return 'Echte Quote';
-    if (id.startsWith('espn_')) return 'ESPN';
-    if (id.startsWith('sportsdb_')) return 'TheSportsDB';
-    if (id.startsWith('fixture_')) return 'API-Football';
-    return 'Spielplan';
+    return _hasRealBookmakerOdds(match) ? 'Echte Quote' : 'Spielplan';
   }
 
   Color _sourceColor(FootballMatch match) {
-    final id = match.id.toLowerCase();
-    if (_hasRealBookmakerOdds(match)) return KickMindTheme.success;
-    if (id.startsWith('espn_')) return Colors.indigo;
-    if (id.startsWith('sportsdb_')) return Colors.blueGrey;
-    if (id.startsWith('fixture_')) return KickMindTheme.primaryDark;
-    return Colors.blueGrey;
+    return _hasRealBookmakerOdds(match) ? KickMindTheme.success : Colors.blueGrey;
+  }
+
+  bool _hasUsableQuote(FootballMatch match) {
+    return match.odds > 1.05 && _hasRealBookmakerOdds(match);
+  }
+
+  String _quoteLabel(FootballMatch match) {
+    if (_hasUsableQuote(match)) {
+      return 'Quote ${match.odds.toStringAsFixed(2)}';
+    }
+    return 'Keine echte Quote';
+  }
+
+  Color _quoteColor(FootballMatch match) {
+    return _hasUsableQuote(match) ? Colors.indigo : Colors.blueGrey;
   }
 
   String _analysisReason(FootballMatch match) {
     final decision = _scoreService.decision(match);
     final score = _scoreService.score(match);
-    final hasOdds = _hasRealBookmakerOdds(match);
-    final source = hasOdds
-        ? 'echter Bookmaker-Quote'
-        : 'echtem Spielplan (${_sourceLabel(match)})';
+    final source = _hasRealBookmakerOdds(match) ? 'echte Bookmaker-Quote' : 'echte Spielplan-Daten ohne bestätigte Quote';
     final valueText = score.valueEdge >= 0
         ? '+${score.valueEdge.toStringAsFixed(1)}%'
         : '${score.valueEdge.toStringAsFixed(1)}%';
@@ -363,25 +380,18 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         break;
     }
 
-    if (!hasOdds) {
-      switch (decision.type) {
-        case TopTipDecisionType.premium:
-        case TopTipDecisionType.value:
-          return 'Analyse-Signal: $tipContext aus $source. Final ${score.finalScore.toStringAsFixed(1)}, Confidence ${score.confidence.toStringAsFixed(0)}%. Ohne echte Quote nur als Beobachtung werten.';
-        case TopTipDecisionType.watch:
-          return 'Beobachten: $tipContext ist anhand des Spielplans interessant. Keine echte Quote vorhanden, deshalb kein Premium-Wett-Tipp.';
-        case TopTipDecisionType.noBet:
-          return 'No Bet: Spiel ist echt, aber Score/Risiko/Confidence reichen ohne echte Quote nicht für einen Tipp.';
-      }
-    }
-
     switch (decision.type) {
       case TopTipDecisionType.premium:
         return 'Premium: $tipContext mit $source, Final ${score.finalScore.toStringAsFixed(1)}, Value $valueText und kontrolliertem Risiko.';
       case TopTipDecisionType.value:
-        return 'Value: $tipContext wirkt im Verhältnis zur Quote interessant. Edge $valueText, Confidence ${score.confidence.toStringAsFixed(0)}%.';
+        if (!_hasUsableQuote(match)) {
+          return 'Beobachtung: $tipContext basiert auf Spielplan-Daten ohne echte Quote. Kein Value-Tipp.';
+        }
+        return 'Value: $tipContext wirkt im Verhältnis zur echten Quote interessant. Edge $valueText, Confidence ${score.confidence.toStringAsFixed(0)}%.';
       case TopTipDecisionType.watch:
-        return 'Beobachten: $tipContext ist solide, aber noch kein Premium-Signal. Risiko ${match.riskLevel}, Final ${score.finalScore.toStringAsFixed(1)}.';
+        return _hasUsableQuote(match)
+            ? 'Beobachten: $tipContext ist solide, aber noch kein Premium-Signal. Risiko ${match.riskLevel}, Final ${score.finalScore.toStringAsFixed(1)}.'
+            : 'Beobachten: $tipContext ist solide, aber ohne echte Quote noch kein Wett-Tipp. Risiko ${match.riskLevel}, Final ${score.finalScore.toStringAsFixed(1)}.';
       case TopTipDecisionType.noBet:
         return 'No Bet: aktuell kein klares Signal. Risiko/Quote/Confidence passen noch nicht stabil zusammen.';
     }
@@ -394,54 +404,40 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     );
   }
 
-  List<FootballMatch> _prepareRankedMatches(List<FootballMatch> matches) {
-    final filtered = matches
-        .where(_hasReadableTeams)
-        .toList();
-
-    filtered.sort(_compareByFinalScore);
-    return filtered;
-  }
-
-  bool _hasReadableTeams(FootballMatch match) {
-    return _isRealTeamName(match.homeTeam) && _isRealTeamName(match.awayTeam);
-  }
-
-  bool _isRealTeamName(String value) {
-    final text = value.trim();
-    if (text.isEmpty) return false;
-    final lower = text.toLowerCase();
-    if (RegExp(r'^(heimteam|auswärtsteam|auswaertsteam)\s*\d+$').hasMatch(lower)) {
-      return false;
-    }
-    if (RegExp(r'^\d+$').hasMatch(text)) return false;
-    return true;
-  }
-
   int _compareByFinalScore(FootballMatch a, FootballMatch b) {
-    final priorityCompare = _analysisPriorityScore(b).compareTo(_analysisPriorityScore(a));
-    if (priorityCompare != 0) return priorityCompare;
-    return _scoreService.compareByFinalScore(a, b);
+    final qualityCompare = _analysisQualityScore(b).compareTo(_analysisQualityScore(a));
+    if (qualityCompare != 0) return qualityCompare;
+
+    final scoreCompare = _scoreService.compareByFinalScore(a, b);
+    if (scoreCompare != 0) return scoreCompare;
+
+    return a.kickoff.compareTo(b.kickoff);
   }
 
-  double _analysisPriorityScore(FootballMatch match) {
+  double _analysisQualityScore(FootballMatch match) {
     final score = _scoreService.score(match);
     final decision = _scoreService.decision(match);
-    final hasOddsBoost = _hasRealBookmakerOdds(match) ? 7.0 : 0.0;
-    final sourceBoost = _sourceLabel(match) == 'ESPN'
-        ? 2.0
-        : _sourceLabel(match) == 'TheSportsDB'
-        ? 1.0
-        : 0.0;
-    final riskPenalty = _isHighRisk(match) ? 10.0 : 0.0;
-    final noBetPenalty = decision.type == TopTipDecisionType.noBet ? 20.0 : 0.0;
-    final watchPenalty = decision.type == TopTipDecisionType.watch ? 4.0 : 0.0;
-    return score.finalScore + hasOddsBoost + sourceBoost - riskPenalty - noBetPenalty - watchPenalty;
-  }
 
-  bool _isHighRisk(FootballMatch match) {
+    final quoteBoost = _hasUsableQuote(match) ? 14.0 : -7.0;
+    final decisionBoost = switch (decision.type) {
+      TopTipDecisionType.premium => 12.0,
+      TopTipDecisionType.value => 8.0,
+      TopTipDecisionType.watch => 2.0,
+      TopTipDecisionType.noBet => -18.0,
+    };
+
     final risk = match.riskLevel.toLowerCase().trim();
-    return risk == 'hoch' || risk == 'high';
+    final riskBoost = risk == 'hoch' || risk == 'high'
+        ? -12.0
+        : risk.contains('niedrig') || risk.contains('low')
+        ? 4.0
+        : 1.0;
+
+    final valueBoost = _hasUsableQuote(match)
+        ? score.valueEdge.clamp(-8.0, 10.0).toDouble() * 0.35
+        : 0.0;
+
+    return score.finalScore + quoteBoost + decisionBoost + riskBoost + valueBoost;
   }
 
   double _finalScore(FootballMatch match) {
@@ -596,7 +592,7 @@ class _AnalysisHero extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '$matchesCount Spiele · $premiumCount Premium · $valueCount Value · $watchCount Beobachten · $noBetCount No Bet',
+                      '$matchesCount Spiele · $premiumCount Premium · $valueCount Value · $watchCount Watch · $noBetCount No Bet',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.78),
                         fontWeight: FontWeight.w800,
@@ -813,6 +809,8 @@ class _AnalysisTipTile extends StatelessWidget {
   final Color statusColor;
   final String sourceLabel;
   final Color sourceColor;
+  final String quoteLabel;
+  final Color quoteColor;
   final String reason;
   final VoidCallback onTap;
 
@@ -826,6 +824,8 @@ class _AnalysisTipTile extends StatelessWidget {
     required this.statusColor,
     required this.sourceLabel,
     required this.sourceColor,
+    required this.quoteLabel,
+    required this.quoteColor,
     required this.reason,
     required this.onTap,
   });
@@ -915,7 +915,7 @@ class _AnalysisTipTile extends StatelessWidget {
                   _SmallPill(label: 'AI ${match.aiScore}%', color: KickMindTheme.warning),
                   _SmallPill(label: 'Value ${valueEdge >= 0 ? '+' : ''}${valueEdge.toStringAsFixed(1)}%', color: KickMindTheme.success),
                   _SmallPill(label: 'Risk ${match.riskLevel}', color: riskColor),
-                  _SmallPill(label: 'Quote ${match.odds.toStringAsFixed(2)}', color: KickMindTheme.textMuted),
+                  _SmallPill(label: quoteLabel, color: quoteColor),
                   _SmallPill(label: 'Conf ${confidence.toStringAsFixed(0)}%', color: KickMindTheme.primary),
                 ],
               ),
@@ -940,6 +940,8 @@ class _CompactAnalysisTile extends StatelessWidget {
   final Color statusColor;
   final String sourceLabel;
   final Color sourceColor;
+  final String quoteLabel;
+  final Color quoteColor;
   final String reason;
   final VoidCallback onTap;
 
@@ -951,6 +953,8 @@ class _CompactAnalysisTile extends StatelessWidget {
     required this.statusColor,
     required this.sourceLabel,
     required this.sourceColor,
+    required this.quoteLabel,
+    required this.quoteColor,
     required this.reason,
     required this.onTap,
   });
@@ -961,7 +965,7 @@ class _CompactAnalysisTile extends StatelessWidget {
       icon: statusLabel == 'Watch' ? Icons.visibility_rounded : Icons.trending_up_rounded,
       iconColor: statusColor,
       title: match.teamsLabel,
-      subtitle: '$statusLabel · $sourceLabel · ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge >= 0 ? '+' : ''}${valueEdge.toStringAsFixed(1)}%',
+      subtitle: '$statusLabel · $sourceLabel · $quoteLabel · ${match.tipLabel} · Final ${finalScore.toStringAsFixed(1)} · Value ${valueEdge >= 0 ? '+' : ''}${valueEdge.toStringAsFixed(1)}%',
       onTap: onTap,
     );
   }
@@ -970,11 +974,15 @@ class _CompactAnalysisTile extends StatelessWidget {
 class _RiskWarningTile extends StatelessWidget {
   final FootballMatch match;
   final double finalScore;
+  final String quoteLabel;
+  final Color quoteColor;
   final VoidCallback onTap;
 
   const _RiskWarningTile({
     required this.match,
     required this.finalScore,
+    required this.quoteLabel,
+    required this.quoteColor,
     required this.onTap,
   });
 
@@ -984,7 +992,7 @@ class _RiskWarningTile extends StatelessWidget {
       icon: Icons.warning_amber_rounded,
       iconColor: KickMindTheme.danger,
       title: match.teamsLabel,
-      subtitle: 'No Bet · ${match.riskLevel} · Final ${finalScore.toStringAsFixed(1)} · nicht als Tipp übernehmen',
+      subtitle: '${match.riskLevel} · Final ${finalScore.toStringAsFixed(1)} · $quoteLabel',
       onTap: onTap,
     );
   }

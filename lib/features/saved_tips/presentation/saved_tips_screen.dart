@@ -24,6 +24,10 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
 
   Future<List<FootballMatch>> _load() async {
     final tips = await _service.loadSavedTips();
+
+    // Merkliste zeigt wieder alle gespeicherten Spiele.
+    // Spiele ohne echte Quote bleiben sichtbar, werden aber klar als
+    // „Beobachtung ohne Quote“ markiert und nicht als echte Quote verkauft.
     tips.sort((a, b) {
       final scoreCompare = TopTipScoreService.instance.compareByFinalScore(a, b);
       if (scoreCompare != 0) return scoreCompare;
@@ -31,6 +35,7 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
     });
     return tips;
   }
+
 
   Future<void> _reload() async {
     setState(() => _future = _load());
@@ -136,7 +141,7 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
               icon: Icons.bookmark_border_rounded,
               title: 'Noch keine gespeicherten Tipps',
               subtitle:
-              'Öffne einen Top Tipp und speichere ihn über das Bookmark-Symbol.',
+              'Öffne einen Top Tipp oder eine Beobachtung und speichere sie über das Bookmark-Symbol.',
               actionLabel: 'Aktualisieren',
               onPressed: () => _reload(),
             );
@@ -155,7 +160,7 @@ class _SavedTipsScreenState extends State<SavedTipsScreen> {
                 const _SectionTitle(
                     icon: Icons.bookmark_rounded,
                     title: 'Gespeicherte Tipps',
-                    subtitle: 'Sortiert nach Final Score und Startzeit.'
+                    subtitle: 'Echte Quote und Beobachtung ohne Quote klar getrennt.'
                 ),
                 const SizedBox(height: 12),
                 ...tips.map((match) {
@@ -457,8 +462,8 @@ class _SavedTipCard extends StatelessWidget {
                         ? KickMindTheme.success
                         : Colors.blueGrey,
                     background: (_hasRealBookmakerOdds(match)
-                            ? KickMindTheme.success
-                            : Colors.blueGrey)
+                        ? KickMindTheme.success
+                        : Colors.blueGrey)
                         .withOpacity(0.10),
                   ),
                   _MetricChip(
@@ -482,9 +487,14 @@ class _SavedTipCard extends StatelessWidget {
                     background: riskColor.withOpacity(0.10),
                   ),
                   _MetricChip(
-                    text: 'Quote ${match.odds.toStringAsFixed(2)}',
-                    color: const Color(0xFF4655A5),
-                    background: const Color(0xFF4655A5).withOpacity(0.10),
+                    text: _quoteLabel(match),
+                    color: _hasRealBookmakerOdds(match)
+                        ? const Color(0xFF4655A5)
+                        : Colors.blueGrey,
+                    background: (_hasRealBookmakerOdds(match)
+                        ? const Color(0xFF4655A5)
+                        : Colors.blueGrey)
+                        .withOpacity(0.10),
                   ),
                   if (value.isValueBet)
                     _MetricChip(
@@ -551,7 +561,14 @@ class _SavedTipCard extends StatelessWidget {
   }
 
   static String _sourceLabel(FootballMatch match) {
-    return _hasRealBookmakerOdds(match) ? 'Echte Quote' : 'Spielplan';
+    return _hasRealBookmakerOdds(match) ? 'Echte Quote' : 'Beobachtung';
+  }
+
+  static String _quoteLabel(FootballMatch match) {
+    if (_hasRealBookmakerOdds(match) && match.odds > 1.05) {
+      return 'Quote ${match.odds.toStringAsFixed(2)}';
+    }
+    return 'Keine echte Quote';
   }
 
   static String _tipMeaning(FootballMatch match) {
@@ -587,7 +604,10 @@ class _SavedTipCard extends StatelessWidget {
     final valueText = value.isValueBet
         ? ' Value +${value.edgePercent.toStringAsFixed(1)}%.'
         : ' Kein starker Value-Vorteil.';
-    return '${decision.label} · $source. ${_tipMeaning(match)} Final ${score.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${score.confidence.toStringAsFixed(0)}%.$valueText';
+    final quoteNote = _hasRealBookmakerOdds(match)
+        ? ' Echte Quote ${match.odds.toStringAsFixed(2)}.'
+        : ' Keine echte Quote – nur Beobachtung.';
+    return '${decision.label} · $source.$quoteNote ${_tipMeaning(match)} Final ${score.finalScore.toStringAsFixed(1)}, AI ${match.aiScore}%, Confidence ${score.confidence.toStringAsFixed(0)}%.$valueText';
   }
 }
 
@@ -637,7 +657,7 @@ class _SavedReasonPanel extends StatelessWidget {
                 ),
               ),
               _MetricChip(
-                text: sourceIsReal ? 'echte Quote' : 'Spielplan',
+                text: sourceIsReal ? 'echte Quote' : 'ohne Quote',
                 color: sourceColor,
                 background: sourceColor.withOpacity(0.10),
               ),

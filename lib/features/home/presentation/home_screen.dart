@@ -33,33 +33,89 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<_HomeDashboardData> _load() async {
+    // Fast Start: Die Startseite darf den ersten Bildschirm nicht durch
+    // Wochen-/ESPN-/SportsDB-Abfragen blockieren. Home lädt deshalb nur Heute
+    // plus Merkliste. Morgen/3 Tage/Woche bleiben den Fachseiten vorbehalten.
     final results = await Future.wait<dynamic>([
       _repository.getMatches(range: MatchDateRange.today),
-      _repository.getMatches(range: MatchDateRange.tomorrow),
-      _repository.getMatches(range: MatchDateRange.next3Days),
-      _repository.getMatches(range: MatchDateRange.next7Days),
       _savedTipsService.loadSavedTips(),
     ]);
 
-    final today = List<FootballMatch>.from(results[0] as List);
-    final tomorrow = List<FootballMatch>.from(results[1] as List);
-    final next3Days = List<FootballMatch>.from(results[2] as List);
-    final next7Days = List<FootballMatch>.from(results[3] as List);
-    final saved = List<FootballMatch>.from(results[4] as List);
+    final rawToday = List<FootballMatch>.from(results[0] as List);
+    final rawSaved = List<FootballMatch>.from(results[1] as List);
 
-    today.sort(_compareByFinalScore);
-    tomorrow.sort(_compareByFinalScore);
-    next3Days.sort(_compareByFinalScore);
-    next7Days.sort(_compareByFinalScore);
-    saved.sort(_compareByFinalScore);
+    final today = _prepareDashboardMatches(rawToday, limit: 12);
+    final saved = _prepareSavedMatches(rawSaved, limit: 12);
 
     return _HomeDashboardData(
       today: today,
-      tomorrow: tomorrow,
-      next3Days: next3Days,
-      next7Days: next7Days,
+      tomorrow: const <FootballMatch>[],
+      next3Days: const <FootballMatch>[],
+      next7Days: const <FootballMatch>[],
       saved: saved,
+      todayCount: rawToday.length,
+      tomorrowCount: 0,
+      next3DaysCount: 0,
+      next7DaysCount: 0,
+      savedCount: rawSaved.length,
     );
+  }
+
+  List<FootballMatch> _matchesForDay(List<FootballMatch> matches, DateTime day) {
+    final target = DateTime(day.year, day.month, day.day);
+    return matches.where((match) {
+      final kickoffDay = DateTime(
+        match.kickoff.year,
+        match.kickoff.month,
+        match.kickoff.day,
+      );
+      return kickoffDay == target;
+    }).toList(growable: false);
+  }
+
+  List<FootballMatch> _matchesForDays(
+      List<FootballMatch> matches,
+      DateTime start,
+      int days,
+      ) {
+    final from = DateTime(start.year, start.month, start.day);
+    final to = from.add(Duration(days: days));
+    return matches.where((match) {
+      return !match.kickoff.isBefore(from) && match.kickoff.isBefore(to);
+    }).toList(growable: false);
+  }
+
+  List<FootballMatch> _prepareDashboardMatches(
+      List<FootballMatch> source, {
+        required int limit,
+      }) {
+    final seen = <String>{};
+    final unique = <FootballMatch>[];
+
+    for (final match in source) {
+      if (!_isRealTeamName(match.homeTeam) || !_isRealTeamName(match.awayTeam)) continue;
+      final key = _matchDedupeKey(match);
+      if (seen.add(key)) unique.add(match);
+    }
+
+    unique.sort(_compareByDashboardQuality);
+    return unique.take(limit).toList(growable: false);
+  }
+
+  List<FootballMatch> _prepareSavedMatches(
+      List<FootballMatch> source, {
+        required int limit,
+      }) {
+    final seen = <String>{};
+    final unique = <FootballMatch>[];
+
+    for (final match in source) {
+      final key = match.id.trim().isEmpty ? _matchDedupeKey(match) : match.id.trim();
+      if (seen.add(key)) unique.add(match);
+    }
+
+    unique.sort(_compareByFinalScore);
+    return unique.take(limit).toList(growable: false);
   }
 
   int _compareByFinalScore(FootballMatch a, FootballMatch b) {
@@ -249,7 +305,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     _DashboardMetricCard(
                       label: 'Heute',
-                      value: '${data.today.length}',
+                      value: '${data.todayCount}',
                       subtitle: 'Spiele',
                       icon: Icons.today_rounded,
                       color: KickMindTheme.primary,
@@ -257,7 +313,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     _DashboardMetricCard(
                       label: 'Morgen',
-                      value: '${data.tomorrow.length}',
+                      value: '${data.tomorrowCount}',
                       subtitle: 'Spiele',
                       icon: Icons.event_rounded,
                       color: KickMindTheme.success,
@@ -265,7 +321,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     _DashboardMetricCard(
                       label: '3 Tage',
-                      value: '${data.next3Days.length}',
+                      value: '${data.next3DaysCount}',
                       subtitle: 'Analyse',
                       icon: Icons.view_week_rounded,
                       color: Colors.deepPurple,
@@ -273,7 +329,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     _DashboardMetricCard(
                       label: 'Meine Tipps',
-                      value: '${data.saved.length}',
+                      value: '${data.savedCount}',
                       subtitle: 'gespeichert',
                       icon: Icons.bookmark_rounded,
                       color: Colors.indigo,
@@ -320,7 +376,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const _HomeSectionTitle(
                   icon: Icons.workspace_premium_rounded,
                   title: 'Beste aktuelle Auswahl',
-                  subtitle: 'Die besten 1–3 Signale nach KickMind Score, Risiko und Datenquelle.',
+                  subtitle: 'Nur die besten 1–3 Signale; große Wochenlisten bleiben im Spiele-Bereich.',
                 ),
                 const SizedBox(height: 10),
                 if (bestMatches.isEmpty)
@@ -370,6 +426,11 @@ class _HomeDashboardData {
   final List<FootballMatch> next3Days;
   final List<FootballMatch> next7Days;
   final List<FootballMatch> saved;
+  final int todayCount;
+  final int tomorrowCount;
+  final int next3DaysCount;
+  final int next7DaysCount;
+  final int savedCount;
 
   const _HomeDashboardData({
     required this.today,
@@ -377,6 +438,11 @@ class _HomeDashboardData {
     required this.next3Days,
     required this.next7Days,
     required this.saved,
+    required this.todayCount,
+    required this.tomorrowCount,
+    required this.next3DaysCount,
+    required this.next7DaysCount,
+    required this.savedCount,
   });
 
   const _HomeDashboardData.empty()
@@ -384,7 +450,12 @@ class _HomeDashboardData {
         tomorrow = const <FootballMatch>[],
         next3Days = const <FootballMatch>[],
         next7Days = const <FootballMatch>[],
-        saved = const <FootballMatch>[];
+        saved = const <FootballMatch>[],
+        todayCount = 0,
+        tomorrowCount = 0,
+        next3DaysCount = 0,
+        next7DaysCount = 0,
+        savedCount = 0;
 
   List<FootballMatch> get rankingSource {
     if (today.isNotEmpty) return today;
@@ -415,9 +486,9 @@ class _DashboardHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalVisible = data.next7Days.isNotEmpty
-        ? data.next7Days.length
-        : data.today.length + data.tomorrow.length;
+    final totalVisible = data.next7DaysCount > 0
+        ? data.next7DaysCount
+        : data.todayCount + data.tomorrowCount;
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -469,7 +540,7 @@ class _DashboardHero extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '$totalVisible Spiele im Wochenblick · ${data.saved.length} gespeichert',
+                      '$totalVisible Spiele im Wochenblick · ${data.savedCount} gespeichert',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.82),
                         fontWeight: FontWeight.w800,
@@ -485,10 +556,10 @@ class _DashboardHero extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _HeroPill(text: '${data.today.length} Heute'),
-              _HeroPill(text: '${data.tomorrow.length} Morgen'),
-              _HeroPill(text: '${data.next3Days.length} 3 Tage'),
-              _HeroPill(text: '${data.next7Days.length} Woche'),
+              _HeroPill(text: '${data.todayCount} Heute'),
+              _HeroPill(text: '${data.tomorrowCount} Morgen'),
+              _HeroPill(text: '${data.next3DaysCount} 3 Tage'),
+              _HeroPill(text: '${data.next7DaysCount} Woche'),
               if (bestScore != null) _HeroPill(text: 'Best ${bestScore!.finalScore.toStringAsFixed(0)}'),
               if (bestDecisionLabel != null) _HeroPill(text: bestDecisionLabel!),
             ],
@@ -862,6 +933,9 @@ class _BestMatchCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
+    final hasQuote = match.id.startsWith('odds_') && match.odds > 1.05;
+    final quoteText = hasQuote ? 'Quote ${match.odds.toStringAsFixed(2)}' : 'Keine Quote';
+    final quoteColor = hasQuote ? Colors.indigo : Colors.blueGrey;
 
     return InkWell(
       onTap: onTap,
@@ -926,7 +1000,7 @@ class _BestMatchCard extends StatelessWidget {
                 _SmallBadge(text: 'Final ${score.finalScore.toStringAsFixed(1)}', color: KickMindTheme.primaryDark),
                 _SmallBadge(text: 'AI ${match.aiScore}%', color: scoreColor),
                 _SmallBadge(text: 'Conf ${score.confidence.toStringAsFixed(0)}%', color: KickMindTheme.primary),
-                _SmallBadge(text: 'Quote ${match.odds.toStringAsFixed(2)}', color: Colors.indigo),
+                _SmallBadge(text: quoteText, color: quoteColor),
               ],
             ),
             const SizedBox(height: 9),
@@ -986,6 +1060,9 @@ class _SavedMiniCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasQuote = match.id.startsWith('odds_') && match.odds > 1.05;
+    final quoteText = hasQuote ? 'Quote ${match.odds.toStringAsFixed(2)}' : 'Keine Quote';
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(18),
@@ -1031,7 +1108,7 @@ class _SavedMiniCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${match.tipLabel} · AI ${match.aiScore}% · Quote ${match.odds.toStringAsFixed(2)}',
+                    '${match.tipLabel} · AI ${match.aiScore}% · $quoteText',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(

@@ -17,14 +17,28 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _homeRefreshKey = 0;
   int _topTipsRefreshKey = 0;
   int _savedTipsRefreshKey = 0;
+  int _analysisRefreshKey = 0;
+  int _liveOddsRefreshKey = 0;
 
-  List<Widget> get _pages => <Widget>[
-    HomeScreen(key: ValueKey<String>('home_$_homeRefreshKey')),
-    TopTipsScreen(key: ValueKey<String>('top_tips_$_topTipsRefreshKey')),
-    const AnalysisScreen(),
-    SavedTipsScreen(key: ValueKey<String>('saved_tips_$_savedTipsRefreshKey')),
-    const LiveOddsScreen(),
-  ];
+  Widget _buildCurrentPage() {
+    // Wichtig: keine IndexedStack-Pages vorab bauen.
+    // Sonst starten Top Tipps, Analyse und Quoten sofort beim App-Start
+    // und lösen parallel API-/ESPN-/SportsDB-Abfragen aus.
+    switch (_tabIndex) {
+      case 0:
+        return HomeScreen(key: ValueKey<String>('home_$_homeRefreshKey'));
+      case 1:
+        return TopTipsScreen(key: ValueKey<String>('top_tips_$_topTipsRefreshKey'));
+      case 2:
+        return AnalysisScreen(key: ValueKey<String>('analysis_$_analysisRefreshKey'));
+      case 3:
+        return SavedTipsScreen(key: ValueKey<String>('saved_tips_$_savedTipsRefreshKey'));
+      case 4:
+        return LiveOddsScreen(key: ValueKey<String>('live_odds_$_liveOddsRefreshKey'));
+      default:
+        return HomeScreen(key: ValueKey<String>('home_$_homeRefreshKey'));
+    }
+  }
 
   static const List<NavigationDestination> _destinations = <NavigationDestination>[
     NavigationDestination(
@@ -35,7 +49,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     NavigationDestination(
       icon: Icon(Icons.auto_graph_outlined),
       selectedIcon: Icon(Icons.auto_graph_rounded),
-      label: 'Tipps',
+      label: 'Top Tipps',
     ),
     NavigationDestination(
       icon: Icon(Icons.analytics_outlined),
@@ -45,7 +59,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     NavigationDestination(
       icon: Icon(Icons.bookmark_border_rounded),
       selectedIcon: Icon(Icons.bookmark_rounded),
-      label: 'Merkliste',
+      label: 'Meine Tipps',
     ),
     NavigationDestination(
       icon: Icon(Icons.casino_outlined),
@@ -58,15 +72,18 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     setState(() {
       _tabIndex = value;
 
-      // Async tabs stay alive inside IndexedStack. Re-key the dynamic tabs
-      // when opened so newly loaded odds and saved tips are visible without
-      // restarting the app.
+      // Nur der geöffnete Tab wird gebaut. Beim erneuten Öffnen laden
+      // dynamische Screens frisch, aber nicht schon beim App-Start.
       if (value == 0) {
         _homeRefreshKey++;
       } else if (value == 1) {
         _topTipsRefreshKey++;
+      } else if (value == 2) {
+        _analysisRefreshKey++;
       } else if (value == 3) {
         _savedTipsRefreshKey++;
+      } else if (value == 4) {
+        _liveOddsRefreshKey++;
       }
     });
   }
@@ -77,69 +94,47 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      extendBody: true,
+      extendBody: false,
       body: SafeArea(
         bottom: false,
-        child: IndexedStack(
-          index: _tabIndex,
-          children: _pages,
-        ),
+        child: _buildCurrentPage(),
       ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: colorScheme.surface,
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(
-                color: colorScheme.outlineVariant.withOpacity(0.45),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.10),
-                  blurRadius: 22,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+      bottomNavigationBar: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 18,
+              offset: const Offset(0, -6),
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(28),
-              child: NavigationBarTheme(
-                data: NavigationBarThemeData(
-                  height: 76,
-                  backgroundColor: colorScheme.surface,
-                  indicatorColor: colorScheme.primary.withOpacity(0.13),
-                  labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((states) {
-                    final selected = states.contains(WidgetState.selected);
-                    return theme.textTheme.labelSmall!.copyWith(
-                      fontSize: 11,
-                      fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
-                      letterSpacing: -0.1,
-                      color: selected
-                          ? colorScheme.primary
-                          : colorScheme.onSurfaceVariant,
-                    );
-                  }),
-                  iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((states) {
-                    final selected = states.contains(WidgetState.selected);
-                    return IconThemeData(
-                      size: selected ? 24 : 22,
-                      color: selected
-                          ? colorScheme.primary
-                          : colorScheme.onSurfaceVariant,
-                    );
-                  }),
-                ),
-                child: NavigationBar(
-                  selectedIndex: _tabIndex,
-                  onDestinationSelected: _selectTab,
-                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                  destinations: _destinations,
-                ),
-              ),
-            ),
+          ],
+        ),
+        child: NavigationBarTheme(
+          data: NavigationBarThemeData(
+            height: 88,
+            backgroundColor: colorScheme.surface,
+            indicatorColor: colorScheme.primary.withOpacity(0.14),
+            labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((states) {
+              final selected = states.contains(WidgetState.selected);
+              return theme.textTheme.labelSmall!.copyWith(
+                fontSize: 10.5,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+              );
+            }),
+            iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((states) {
+              final selected = states.contains(WidgetState.selected);
+              return IconThemeData(
+                size: selected ? 25 : 23,
+                color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+              );
+            }),
+          ),
+          child: NavigationBar(
+            selectedIndex: _tabIndex,
+            onDestinationSelected: _selectTab,
+            destinations: _destinations,
           ),
         ),
       ),
