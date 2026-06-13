@@ -45,18 +45,16 @@ class _LiveOddsScreenState extends State<LiveOddsScreen> {
 
   Future<_FixtureSourceSummary> _loadFixtureSourceSummary() async {
     try {
-      final results = await Future.wait([
-        _matchRepository.getMatches(range: MatchDateRange.today),
-        _matchRepository.getMatches(range: MatchDateRange.tomorrow),
-        _matchRepository.getMatches(range: MatchDateRange.next3Days),
-        _matchRepository.getMatches(range: MatchDateRange.next7Days),
-      ]);
+      // Performance: Live-Odds darf beim Öffnen nicht zusätzlich Morgen/3 Tage/Woche
+      // aus der Match-Quelle laden. Diese Seite prüft Quoten; der Spielplan bleibt
+      // in Spiele/Analyse. Für die Leerseite reicht Heute als echte Vergleichsquelle.
+      final today = await _matchRepository.getMatches(range: MatchDateRange.today);
 
       return _FixtureSourceSummary(
-        todayMatches: results[0],
-        tomorrowMatches: results[1],
-        next3DaysMatches: results[2],
-        next7DaysMatches: results[3],
+        todayMatches: today,
+        tomorrowMatches: const <FootballMatch>[],
+        next3DaysMatches: const <FootballMatch>[],
+        next7DaysMatches: const <FootballMatch>[],
       );
     } catch (_) {
       return const _FixtureSourceSummary.empty();

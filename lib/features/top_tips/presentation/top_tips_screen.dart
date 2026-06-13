@@ -483,10 +483,9 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
       return score.finalScore >= 62 || score.isValueBet || score.isRecommended;
     }
 
-    // Spielplan-Tipps ohne echte Quote dürfen sichtbar sein, aber erst ab
-    // höherer Qualität. Dadurch verkauft die App nicht jedes echte Spiel als
-    // Top-Tipp, solange API-Football keine Quoten liefert.
-    return score.finalScore >= 68 && match.aiScore >= 62;
+    // Ohne echte Bookmaker-Quote nicht als Top-Tipp verkaufen.
+    // Diese Spiele bleiben weiter in Beobachten sichtbar.
+    return false;
   }
 
   bool _isSmartWatchCandidate(FootballMatch match) {
@@ -504,11 +503,12 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
   }
 
   bool _hasRealBookmakerOdds(FootballMatch match) {
-    return match.id.startsWith('odds_');
+    return (match.hasPlayableOdds || match.hasRealOdds || match.id.startsWith('odds_')) &&
+        match.odds > 1.05;
   }
 
   bool _hasUsableOdds(FootballMatch match) {
-    return match.odds >= 1.18 && match.odds <= 4.50;
+    return _hasRealBookmakerOdds(match) && match.odds >= 1.18 && match.odds <= 4.50;
   }
 
   bool _isHighRisk(FootballMatch match) {

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kickmind_ai/core/config/api_config.dart';
 import 'package:kickmind_ai/features/odds/domain/live_odds.dart';
 
@@ -29,7 +30,9 @@ class LiveOddsService {
   static final Map<String, _FixtureTeams> _fixtureTeamsCache = <String, _FixtureTeams>{};
   static bool _apiFootballDailyLimitReached = false;
   static DateTime? _apiFootballDailyLimitReachedAt;
+  static bool _persistedLimitLoaded = false;
 
+  static const String _apiFootballLimitDatePrefsKey = 'kickmind_live_odds_api_football_limit_date';
   static const Duration _cacheDuration = Duration(minutes: 20);
 
   static const List<_LiveOddsLeagueRef> _supplementalLeagues = <_LiveOddsLeagueRef>[
@@ -56,6 +59,7 @@ class LiveOddsService {
     final safeDays = days < 1 ? 1 : days;
     final cacheKey = 'v3_${_formatDate(normalizedToday)}_$safeDays';
     final now = DateTime.now();
+    await _loadPersistedApiFootballLimit();
     final rangeEnd = normalizedToday.add(Duration(days: safeDays - 1));
     final rangeText = '${_formatDate(normalizedToday)} bis ${_formatDate(rangeEnd)}';
 
@@ -223,6 +227,7 @@ class LiveOddsService {
     final rangeText = '${_formatDate(normalizedStart)} bis ${_formatDate(rangeEnd)}';
     final cacheKey = 'range_v3_${_formatDate(normalizedStart)}_$safeDays';
     final now = DateTime.now();
+    await _loadPersistedApiFootballLimit();
 
     if (!ApiConfig.hasFootballApiKey) {
       lastDiagnostics = LiveOddsFetchDiagnostics(
@@ -796,6 +801,28 @@ class LiveOddsService {
     }
   }
 
+  Future<void> _loadPersistedApiFootballLimit() async {
+    if (_persistedLimitLoaded) return;
+    _persistedLimitLoaded = true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedDate = prefs.getString(_apiFootballLimitDatePrefsKey);
+      final today = _formatDate(DateTime.now());
+
+      if (savedDate == today) {
+        _apiFootballDailyLimitReached = true;
+        _apiFootballDailyLimitReachedAt = DateTime.now();
+        // ignore: avoid_print
+        print('API-FOOTBALL LIMIT FAST SKIP live odds persisted $today');
+      } else if (savedDate != null && savedDate.isNotEmpty) {
+        await prefs.remove(_apiFootballLimitDatePrefsKey);
+      }
+    } catch (_) {
+      // Persistenz darf Live-Odds nie blockieren.
+    }
+  }
+
   bool _shouldSkipApiFootball(String context) {
     if (!_apiFootballDailyLimitReached) return false;
 
@@ -814,6 +841,11 @@ class LiveOddsService {
   void _markApiFootballDailyLimitReached(String context) {
     _apiFootballDailyLimitReached = true;
     _apiFootballDailyLimitReachedAt = DateTime.now();
+
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString(_apiFootballLimitDatePrefsKey, _formatDate(DateTime.now())))
+        .catchError((_) => false);
+
     // ignore: avoid_print
     print('API-FOOTBALL DAILY LIMIT REACHED live odds ($context)');
   }
