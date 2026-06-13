@@ -307,11 +307,20 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   String _categoryLabel(FootballMatch match) {
-    return _scoreService.decision(match).shortLabel;
+    final decision = _scoreService.decision(match);
+    if (!_hasUsableQuote(match) && decision.type != TopTipDecisionType.noBet) {
+      return 'Beobachten';
+    }
+    return decision.shortLabel;
   }
 
   Color _categoryColor(FootballMatch match) {
-    switch (_scoreService.decision(match).type) {
+    final decision = _scoreService.decision(match);
+    if (!_hasUsableQuote(match) && decision.type != TopTipDecisionType.noBet) {
+      return KickMindTheme.primaryDark;
+    }
+
+    switch (decision.type) {
       case TopTipDecisionType.premium:
         return KickMindTheme.primary;
       case TopTipDecisionType.value:
@@ -324,11 +333,21 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   bool _hasRealBookmakerOdds(FootballMatch match) {
-    return match.id.startsWith('odds_');
+    return match.odds > 1.05 && (match.hasPlayableOdds || match.hasRealOdds);
   }
 
   String _sourceLabel(FootballMatch match) {
-    return _hasRealBookmakerOdds(match) ? 'Echte Quote' : 'Spielplan';
+    if (_hasRealBookmakerOdds(match)) {
+      final bookmaker = match.realOddsBookmaker?.trim();
+      if (bookmaker != null && bookmaker.isNotEmpty) {
+        return 'Echte Quote · $bookmaker';
+      }
+      return 'Echte Quote';
+    }
+    if (match.id.startsWith('espn_')) return 'ESPN Spielplan';
+    if (match.id.startsWith('sportsdb_')) return 'TheSportsDB Spielplan';
+    if (match.id.startsWith('fixture_')) return 'API-Football Spielplan';
+    return 'Spielplan';
   }
 
   Color _sourceColor(FootballMatch match) {
@@ -336,7 +355,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   bool _hasUsableQuote(FootballMatch match) {
-    return match.odds > 1.05 && _hasRealBookmakerOdds(match);
+    return _hasRealBookmakerOdds(match);
   }
 
   String _quoteLabel(FootballMatch match) {
@@ -354,6 +373,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     final decision = _scoreService.decision(match);
     final score = _scoreService.score(match);
     final source = _hasRealBookmakerOdds(match) ? 'echte Bookmaker-Quote' : 'echte Spielplan-Daten ohne bestätigte Quote';
+    final hasQuote = _hasUsableQuote(match);
     final valueText = score.valueEdge >= 0
         ? '+${score.valueEdge.toStringAsFixed(1)}%'
         : '${score.valueEdge.toStringAsFixed(1)}%';
@@ -382,14 +402,17 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
     switch (decision.type) {
       case TopTipDecisionType.premium:
+        if (!hasQuote) {
+          return 'Beobachtung: $tipContext basiert auf $source. Ohne echte Quote kein Premium-Wett-Tipp.';
+        }
         return 'Premium: $tipContext mit $source, Final ${score.finalScore.toStringAsFixed(1)}, Value $valueText und kontrolliertem Risiko.';
       case TopTipDecisionType.value:
-        if (!_hasUsableQuote(match)) {
+        if (!hasQuote) {
           return 'Beobachtung: $tipContext basiert auf Spielplan-Daten ohne echte Quote. Kein Value-Tipp.';
         }
         return 'Value: $tipContext wirkt im Verhältnis zur echten Quote interessant. Edge $valueText, Confidence ${score.confidence.toStringAsFixed(0)}%.';
       case TopTipDecisionType.watch:
-        return _hasUsableQuote(match)
+        return hasQuote
             ? 'Beobachten: $tipContext ist solide, aber noch kein Premium-Signal. Risiko ${match.riskLevel}, Final ${score.finalScore.toStringAsFixed(1)}.'
             : 'Beobachten: $tipContext ist solide, aber ohne echte Quote noch kein Wett-Tipp. Risiko ${match.riskLevel}, Final ${score.finalScore.toStringAsFixed(1)}.';
       case TopTipDecisionType.noBet:
