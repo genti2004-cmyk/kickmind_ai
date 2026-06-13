@@ -333,7 +333,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   bool _hasRealBookmakerOdds(FootballMatch match) {
-    return match.odds > 1.05 && (match.hasPlayableOdds || match.hasRealOdds);
+    return match.odds > 1.05 &&
+        (match.hasPlayableOdds || match.hasRealOdds || match.id.startsWith('odds_'));
   }
 
   String _sourceLabel(FootballMatch match) {

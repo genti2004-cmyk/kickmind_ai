@@ -5,6 +5,18 @@ import 'package:kickmind_ai/features/matches/domain/football_match.dart';
 import 'package:kickmind_ai/features/matches/presentation/match_detail_screen.dart';
 import 'package:kickmind_ai/features/saved_tips/data/saved_tips_service.dart';
 
+
+bool _kmSavedHasRealBookmakerOdds(FootballMatch match) {
+  return match.odds > 1.05 &&
+      (match.hasPlayableOdds || match.hasRealOdds || match.id.startsWith('odds_'));
+}
+
+String _kmSavedQuoteLabel(FootballMatch match) {
+  return _kmSavedHasRealBookmakerOdds(match)
+      ? 'Quote ${match.odds.toStringAsFixed(2)}'
+      : 'Keine echte Quote';
+}
+
 class SavedTipsScreen extends StatefulWidget {
   const SavedTipsScreen({super.key});
 
@@ -243,7 +255,7 @@ class _SavedSummary extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '${stats.count} gespeicherte Tipps · Ø AI ${stats.averageAi.toStringAsFixed(0)}% · Ø Quote ${stats.averageOdds.toStringAsFixed(2)} · Best ${stats.bestFinal.toStringAsFixed(1)}',
+            '${stats.count} gespeicherte Tipps · Ø AI ${stats.averageAi.toStringAsFixed(0)}% · Ø echte Quote ${stats.averageOdds > 0 ? stats.averageOdds.toStringAsFixed(2) : '-'} · Best ${stats.bestFinal.toStringAsFixed(1)}',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -556,20 +568,13 @@ class _SavedTipCard extends StatelessWidget {
     return '$hour:$minute';
   }
 
-  static bool _hasRealBookmakerOdds(FootballMatch match) {
-    return match.id.startsWith('odds_');
-  }
+  static bool _hasRealBookmakerOdds(FootballMatch match) => _kmSavedHasRealBookmakerOdds(match);
 
   static String _sourceLabel(FootballMatch match) {
     return _hasRealBookmakerOdds(match) ? 'Echte Quote' : 'Beobachtung';
   }
 
-  static String _quoteLabel(FootballMatch match) {
-    if (_hasRealBookmakerOdds(match) && match.odds > 1.05) {
-      return 'Quote ${match.odds.toStringAsFixed(2)}';
-    }
-    return 'Keine echte Quote';
-  }
+  static String _quoteLabel(FootballMatch match) => _kmSavedQuoteLabel(match);
 
   static String _tipMeaning(FootballMatch match) {
     final label = match.tipLabel.toLowerCase();
@@ -891,12 +896,17 @@ class _SavedTipsStats {
       decisions.add(_SavedTipDecision.from(tips[i]));
     }
 
+    final realOddsTips = tips.where(_kmSavedHasRealBookmakerOdds).toList();
+    final averageOdds = realOddsTips.isEmpty
+        ? 0.0
+        : realOddsTips.map((m) => m.odds).reduce((a, b) => a + b) / realOddsTips.length;
+
     return _SavedTipsStats(
       count: tips.length,
       averageAi: tips.map((m) => m.aiScore).reduce((a, b) => a + b) / tips.length,
       averageFinal:
       scores.map((s) => s.finalScore).reduce((a, b) => a + b) / scores.length,
-      averageOdds: tips.map((m) => m.odds).reduce((a, b) => a + b) / tips.length,
+      averageOdds: averageOdds,
       bestFinal: scores.map((s) => s.finalScore).reduce((a, b) => a > b ? a : b),
       premiumCount: decisions.where((d) => d.type == _SavedTipDecisionType.premium).length,
       valueCount: decisions.where((d) => d.type == _SavedTipDecisionType.value).length,

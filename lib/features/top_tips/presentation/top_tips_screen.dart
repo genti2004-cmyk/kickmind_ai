@@ -11,6 +11,31 @@ import 'package:kickmind_ai/features/odds/domain/live_odds.dart';
 import 'package:kickmind_ai/features/predictions/domain/prediction_engine.dart';
 import 'package:kickmind_ai/features/saved_tips/data/saved_tips_service.dart';
 
+
+bool _kmHasRealBookmakerOdds(FootballMatch match) {
+  return match.odds > 1.05 &&
+      (match.hasPlayableOdds || match.hasRealOdds || match.id.startsWith('odds_'));
+}
+
+String _kmQuoteLabel(FootballMatch match) {
+  return _kmHasRealBookmakerOdds(match)
+      ? 'Quote ${match.odds.toStringAsFixed(2)}'
+      : 'Keine echte Quote';
+}
+
+String _kmSourceLabel(FootballMatch match) {
+  if (_kmHasRealBookmakerOdds(match)) {
+    final bookmaker = match.realOddsBookmaker?.trim();
+    if (bookmaker != null && bookmaker.isNotEmpty) return 'Echte Quote · $bookmaker';
+    return 'Echte Quote';
+  }
+  return 'Beobachtung';
+}
+
+Color _kmSourceColor(FootballMatch match) {
+  return _kmHasRealBookmakerOdds(match) ? KickMindTheme.success : Colors.blueGrey;
+}
+
 class TopTipsScreen extends StatefulWidget {
   const TopTipsScreen({super.key});
 
@@ -38,7 +63,6 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
 
   Future<List<FootballMatch>> _load({bool forceRefresh = false}) async {
     final oddsMatches = await _loadRealOddsTopTips(forceRefresh: forceRefresh);
-    debugPrint('TOP_TIPS ODDS MATCHES ${_range.name}: ${oddsMatches.length}');
 
     // Fallback auf exakt dieselbe echte Spielquelle wie Analyse/Spiele.
     // Wichtig: Top Tips darf nicht leer bleiben, nur weil API-Football keine
@@ -74,7 +98,6 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     }
 
     merged.sort(_compareByTopTipQuality);
-    debugPrint('TOP_TIPS MERGED ${_range.name}: ${merged.length}');
     return merged;
   }
 
@@ -88,7 +111,6 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
         .toList();
 
     normalized.sort(_compareByTopTipQuality);
-    debugPrint('TOP_TIPS REPOSITORY FALLBACK ${_range.name}: ${normalized.length}');
     return normalized;
   }
 
@@ -101,10 +123,6 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
       start: start,
       days: days,
       forceRefresh: forceRefresh,
-    );
-
-    debugPrint(
-      'TOP_TIPS LIVE_ODDS RAW ${_range.name}: ${odds.length} | ${_liveOddsService.lastDiagnostics.message}',
     );
 
     final matches = <FootballMatch>[];
@@ -135,7 +153,6 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     );
 
     if (!_isRealTeamName(home) || !_isRealTeamName(away)) {
-      debugPrint('TOP_TIPS SKIP SYNTHETIC ODDS TEAM $fixtureId: $home vs $away');
       return null;
     }
 
@@ -502,10 +519,7 @@ class _TopTipsScreenState extends State<TopTipsScreen> {
     return false;
   }
 
-  bool _hasRealBookmakerOdds(FootballMatch match) {
-    return (match.hasPlayableOdds || match.hasRealOdds || match.id.startsWith('odds_')) &&
-        match.odds > 1.05;
-  }
+  bool _hasRealBookmakerOdds(FootballMatch match) => _kmHasRealBookmakerOdds(match);
 
   bool _hasUsableOdds(FootballMatch match) {
     return _hasRealBookmakerOdds(match) && match.odds >= 1.18 && match.odds <= 4.50;
@@ -998,8 +1012,8 @@ class _TopTipCard extends StatelessWidget {
                 Expanded(
                   child: _MetricTile(
                     label: 'Quote',
-                    value: match.odds.toStringAsFixed(2),
-                    color: Colors.indigo,
+                    value: _quoteMetricValue(),
+                    color: _hasRealBookmakerOdds() ? Colors.indigo : Colors.blueGrey,
                   ),
                 ),
               ],
@@ -1078,8 +1092,10 @@ class _TopTipCard extends StatelessWidget {
     return 'No Bet · Datenlage aktuell zu schwach';
   }
 
-  bool _hasRealBookmakerOdds() {
-    return match.id.startsWith('odds_');
+  bool _hasRealBookmakerOdds() => _kmHasRealBookmakerOdds(match);
+
+  String _quoteMetricValue() {
+    return _hasRealBookmakerOdds() ? match.odds.toStringAsFixed(2) : 'Keine';
   }
 
   bool _isHighRisk() {
@@ -1087,13 +1103,9 @@ class _TopTipCard extends StatelessWidget {
     return risk == 'hoch' || risk == 'high';
   }
 
-  String _dataSourceLabel() {
-    return _hasRealBookmakerOdds() ? 'Echte Quote' : 'Spielplan';
-  }
+  String _dataSourceLabel() => _kmSourceLabel(match);
 
-  Color _dataSourceColor() {
-    return _hasRealBookmakerOdds() ? KickMindTheme.success : Colors.blueGrey;
-  }
+  Color _dataSourceColor() => _kmSourceColor(match);
 }
 
 class _MetricTile extends StatelessWidget {
@@ -1372,12 +1384,14 @@ class _TopTipOddsRelevance {
   final double oddsValue;
   final OddsMarketScore score;
   final OddsMarketDecision decision;
+  final bool hasRealOdds;
 
   const _TopTipOddsRelevance({
     required this.marketLabel,
     required this.oddsValue,
     required this.score,
     required this.decision,
+    required this.hasRealOdds,
   });
 
   factory _TopTipOddsRelevance.fromMatch(FootballMatch match) {
@@ -1401,6 +1415,7 @@ class _TopTipOddsRelevance {
       oddsValue: match.odds,
       score: score,
       decision: decision,
+      hasRealOdds: _kmHasRealBookmakerOdds(match),
     );
   }
 
@@ -1453,7 +1468,9 @@ class _TopTipOddsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _decisionColor(relevance.decision.type);
+    final color = relevance.hasRealOdds
+        ? _decisionColor(relevance.decision.type)
+        : Colors.blueGrey;
     final valueText = relevance.score.valueEdge >= 0
         ? '+${relevance.score.valueEdge.toStringAsFixed(1)}'
         : relevance.score.valueEdge.toStringAsFixed(1);
@@ -1475,7 +1492,7 @@ class _TopTipOddsPanel extends StatelessWidget {
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
-                  relevance.decision.label,
+                  relevance.hasRealOdds ? relevance.decision.label : 'Beobachtung ohne Quote',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1486,14 +1503,16 @@ class _TopTipOddsPanel extends StatelessWidget {
                 ),
               ),
               _MiniScorePill(
-                text: 'Q ${relevance.score.finalScore.toStringAsFixed(0)}',
+                text: relevance.hasRealOdds ? 'Q ${relevance.score.finalScore.toStringAsFixed(0)}' : 'Info',
                 color: color,
               ),
             ],
           ),
           const SizedBox(height: 7),
           Text(
-            '${relevance.marketLabel} · Quote ${relevance.oddsValue.toStringAsFixed(2)} · Risiko ${relevance.score.riskLevel} · Value $valueText',
+            relevance.hasRealOdds
+                ? '${relevance.marketLabel} · Quote ${relevance.oddsValue.toStringAsFixed(2)} · Risiko ${relevance.score.riskLevel} · Value $valueText'
+                : '${relevance.marketLabel} · Keine echte Quote · nur Beobachtung',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -1566,9 +1585,9 @@ class _CompactTipCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scoreColor = KickMindTheme.scoreColor(match.aiScore);
     final oddsRelevance = _TopTipOddsRelevance.fromMatch(match);
-    final isRealOdds = match.id.startsWith('odds_');
-    final sourceLabel = isRealOdds ? 'Echte Quote' : 'Spielplan';
-    final sourceColor = isRealOdds ? KickMindTheme.success : Colors.blueGrey;
+    final isRealOdds = _kmHasRealBookmakerOdds(match);
+    final sourceLabel = _kmSourceLabel(match);
+    final sourceColor = _kmSourceColor(match);
 
     return InkWell(
       onTap: onTap,
@@ -1643,12 +1662,14 @@ class _CompactTipCard extends StatelessWidget {
                       _MiniScorePill(text: sourceLabel, color: sourceColor),
                       _MiniScorePill(text: match.tipLabel, color: KickMindTheme.primary),
                       _MiniScorePill(
-                        text: 'Q ${oddsRelevance.score.finalScore.toStringAsFixed(0)}',
-                        color: scoreColor,
+                        text: isRealOdds
+                            ? 'Q ${oddsRelevance.score.finalScore.toStringAsFixed(0)}'
+                            : 'Info',
+                        color: isRealOdds ? scoreColor : Colors.blueGrey,
                       ),
                       _MiniScorePill(
-                        text: match.odds.toStringAsFixed(2),
-                        color: Colors.indigo,
+                        text: isRealOdds ? match.odds.toStringAsFixed(2) : 'Keine Quote',
+                        color: isRealOdds ? Colors.indigo : Colors.blueGrey,
                       ),
                     ],
                   ),
