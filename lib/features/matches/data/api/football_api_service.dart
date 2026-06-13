@@ -41,6 +41,15 @@ class FootballApiService {
   static String? _apiFootballDailyLimitDateKey;
   static bool _apiFootballDailyLimitLoadedFromDisk = false;
   static const String _apiFootballDailyLimitPrefsKey = 'kickmind_api_football_daily_limit_date_v1';
+  static final Set<String> _printedLogKeys = <String>{};
+
+  void _logOnce(String key, String message) {
+    if (_printedLogKeys.add(key)) {
+      // ignore: avoid_print
+      print(message);
+    }
+  }
+
 
   static const List<_ApiLeagueRef> _supplementalApiFootballLeagues = <_ApiLeagueRef>[
     _ApiLeagueRef(1),
@@ -350,8 +359,7 @@ class FootballApiService {
   Future<List<FootballMatch>> _fetchFixturesForDayOnline(DateTime day) async {
     final date = _formatDate(day);
     if (_isApiFootballDailyLimitBlocked()) {
-      // ignore: avoid_print
-      print('API-FOOTBALL LIMIT SKIP fixtures $date');
+      _logOnce('api_limit_skip_fixtures', 'API-FOOTBALL LIMIT SKIP fixtures: Tageslimit aktiv.');
       return <FootballMatch>[];
     }
 
@@ -365,8 +373,7 @@ class FootballApiService {
       ).timeout(const Duration(seconds: 14));
 
       if (response.statusCode != 200) {
-        // ignore: avoid_print
-        print('FIXTURES STATUS ${response.statusCode} ${_formatDate(day)}');
+        _logOnce('fixtures_status_${response.statusCode}', 'FIXTURES STATUS ${response.statusCode}.');
         return <FootballMatch>[];
       }
 
@@ -378,8 +385,7 @@ class FootballApiService {
 
       final rawResponse = decoded['response'];
       if (rawResponse is! List || rawResponse.isEmpty) {
-        // ignore: avoid_print
-        print('FIXTURES EMPTY ${_formatDate(day)}');
+        _logOnce('fixtures_empty', 'FIXTURES EMPTY: API-Football liefert aktuell keine Fixture-Liste.');
         return <FootballMatch>[];
       }
 
@@ -392,8 +398,7 @@ class FootballApiService {
       }
 
       final sorted = _dedupeAndSort(matches);
-      // ignore: avoid_print
-      print('FIXTURES PARSED ${_formatDate(day)}: ${sorted.length}');
+      // Konsole ruhig halten: erfolgreiche Fixture-Abrufe werden nicht jedes Mal geloggt.
       return sorted;
     } catch (_) {
       return <FootballMatch>[];
@@ -410,8 +415,7 @@ class FootballApiService {
     final from = _formatDate(start);
     final to = _formatDate(start.add(Duration(days: days - 1)));
     if (_isApiFootballDailyLimitBlocked()) {
-      // ignore: avoid_print
-      print('API-FOOTBALL LIMIT SKIP fixtures league supplement $from-$to');
+      _logOnce('api_limit_skip_fixtures_league', 'API-FOOTBALL LIMIT SKIP fixtures league supplement: Tageslimit aktiv.');
       return <FootballMatch>[];
     }
     final target = days * _minimumFixtureTargetPerDay;
@@ -461,8 +465,7 @@ class FootballApiService {
     }
 
     final sorted = _dedupeAndSort(result);
-    // ignore: avoid_print
-    print('FIXTURES LEAGUE SUPPLEMENT $from-$to: ${sorted.length}');
+    // Konsole ruhig halten: League-Supplement-Erfolg wird nicht jedes Mal geloggt.
     return sorted;
   }
 
@@ -475,8 +478,7 @@ class FootballApiService {
     final from = _formatDate(start);
     final to = _formatDate(start.add(Duration(days: days - 1)));
     if (_isApiFootballDailyLimitBlocked()) {
-      // ignore: avoid_print
-      print('API-FOOTBALL LIMIT SKIP odds league supplement $from-$to');
+      _logOnce('api_limit_skip_odds_league', 'API-FOOTBALL LIMIT SKIP odds league supplement: Tageslimit aktiv.');
       return <_OddsSnapshot>[];
     }
     final target = (days * 12).clamp(12, 80).toInt();
@@ -539,8 +541,7 @@ class FootballApiService {
 
     final sorted = unique.values.toList()
       ..sort((a, b) => a.kickoff.compareTo(b.kickoff));
-    // ignore: avoid_print
-    print('ODDS LEAGUE SUPPLEMENT $from-$to: ${sorted.length}');
+    // Konsole ruhig halten: Odds-Supplement-Erfolg wird nicht jedes Mal geloggt.
     return sorted;
   }
 
@@ -564,8 +565,7 @@ class FootballApiService {
 
       final response = await _client.get(uri).timeout(const Duration(seconds: 12));
       if (response.statusCode != 200) {
-        // ignore: avoid_print
-        print('SPORTSDB STATUS ${response.statusCode} $date');
+        _logOnce('sportsdb_status_${response.statusCode}', 'SPORTSDB STATUS ${response.statusCode}.');
         return <FootballMatch>[];
       }
 
@@ -574,8 +574,7 @@ class FootballApiService {
 
       final events = decoded['events'];
       if (events is! List || events.isEmpty) {
-        // ignore: avoid_print
-        print('SPORTSDB EMPTY $date');
+        _logOnce('sportsdb_empty', 'SPORTSDB EMPTY: keine Soccer-Spiele für geprüften Tag.');
         return <FootballMatch>[];
       }
 
@@ -613,12 +612,10 @@ class FootballApiService {
       }
 
       final sorted = _dedupeAndSort(result).take(220).toList();
-      // ignore: avoid_print
-      print('SPORTSDB PARSED $date: ${sorted.length}');
+      // Konsole ruhig halten: erfolgreiche SportsDB-Fallbacks werden nicht jedes Mal geloggt.
       return sorted;
     } catch (error) {
-      // ignore: avoid_print
-      print('SPORTSDB ERROR ${_formatDate(day)}: $error');
+      _logOnce('sportsdb_error_${error.runtimeType}', 'SPORTSDB ERROR: ${error.runtimeType}');
       return <FootballMatch>[];
     }
   }
@@ -651,8 +648,7 @@ class FootballApiService {
         .take(220)
         .toList();
 
-    // ignore: avoid_print
-    print('ESPN SOCCER SUPPLEMENT $fromText-$toText: ${sorted.length}');
+    // Konsole ruhig halten: erfolgreiche ESPN-Supplements werden nicht jedes Mal geloggt.
     return sorted;
   }
 
@@ -1073,8 +1069,7 @@ class FootballApiService {
     final date = _formatDate(day);
 
     if (_isApiFootballDailyLimitBlocked()) {
-      // ignore: avoid_print
-      print('API-FOOTBALL LIMIT SKIP odds $date');
+      _logOnce('api_limit_skip_odds', 'API-FOOTBALL LIMIT SKIP odds: Tageslimit aktiv.');
       return <_OddsSnapshot>[];
     }
 
@@ -1116,8 +1111,7 @@ class FootballApiService {
       }
     }
 
-    // ignore: avoid_print
-    print('ODDS PARSED ${_formatDate(day)}: ${result.length} usable real bookmaker odds');
+    // Konsole ruhig halten: erfolgreiche Odds-Day-Abrufe werden nicht jedes Mal geloggt.
     return result;
   }
 
@@ -1499,8 +1493,7 @@ class FootballApiService {
       if (savedDateKey == todayKey) {
         _apiFootballDailyLimitReached = true;
         _apiFootballDailyLimitDateKey = todayKey;
-        // ignore: avoid_print
-        print('API-FOOTBALL LIMIT FAST SKIP persisted $todayKey');
+        _logOnce('api_limit_fast_skip_persisted', 'API-FOOTBALL LIMIT FAST SKIP persisted $todayKey');
         return;
       }
 
@@ -1552,8 +1545,7 @@ class FootballApiService {
     _apiFootballDailyLimitDateKey = todayKey;
     _persistApiFootballDailyLimit(todayKey);
 
-    // ignore: avoid_print
-    print("API-FOOTBALL DAILY LIMIT REACHED ($context): ${errors.values.join(' | ')}");
+    _logOnce('api_limit_reached', "API-FOOTBALL DAILY LIMIT REACHED ($context): ${errors.values.join(' | ')}");
     return true;
   }
 

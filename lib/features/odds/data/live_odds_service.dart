@@ -33,7 +33,15 @@ class LiveOddsService {
   static bool _persistedLimitLoaded = false;
 
   static const String _apiFootballLimitDatePrefsKey = 'kickmind_live_odds_api_football_limit_date';
+  static final Set<String> _printedLogKeys = <String>{};
   static const Duration _cacheDuration = Duration(minutes: 20);
+
+  void _logOnce(String key, String message) {
+    if (_printedLogKeys.add(key)) {
+      // ignore: avoid_print
+      print(message);
+    }
+  }
 
   static const List<_LiveOddsLeagueRef> _supplementalLeagues = <_LiveOddsLeagueRef>[
     _LiveOddsLeagueRef(1),
@@ -504,8 +512,7 @@ class LiveOddsService {
         ? (messages.isEmpty ? '0 Roh-Datensätze' : messages.take(3).join(' · '))
         : '${rawResponseCount} Roh-Datensätze, ${list.length} verwendbar (${messages.take(3).join(' · ')})';
 
-    // ignore: avoid_print
-    print('LIVE ODDS ${_formatDate(date)}: $message');
+    // Konsole ruhig halten: Live-Odds-Tagesdetails bleiben in lastDiagnostics sichtbar.
 
     return _OddsDateFetchResult(
       odds: list,
@@ -523,8 +530,7 @@ class LiveOddsService {
     final toText = _formatDate(start.add(Duration(days: days - 1)));
 
     if (_shouldSkipApiFootball('odds league supplement $fromText-$toText')) {
-      // ignore: avoid_print
-      print('LIVE ODDS LEAGUE SUPPLEMENT $fromText-$toText: 0 (API-Football Tageslimit)');
+      _logOnce('live_odds_league_limit_skip', 'LIVE ODDS LEAGUE SUPPLEMENT: 0 (API-Football Tageslimit)');
       return <LiveOdds>[];
     }
 
@@ -560,8 +566,7 @@ class LiveOddsService {
               }
               final sorted = unique.values.toList()
                 ..sort((a, b) => '${a.homeTeam} ${a.awayTeam}'.compareTo('${b.homeTeam} ${b.awayTeam}'));
-              // ignore: avoid_print
-              print('LIVE ODDS LEAGUE SUPPLEMENT $fromText-$toText: ${sorted.length} (API-Football Tageslimit)');
+              _logOnce('live_odds_league_limit_reached', 'LIVE ODDS LEAGUE SUPPLEMENT: ${sorted.length} (API-Football Tageslimit)');
               return sorted;
             }
 
@@ -595,8 +600,7 @@ class LiveOddsService {
 
     final sorted = unique.values.toList()
       ..sort((a, b) => '${a.homeTeam} ${a.awayTeam}'.compareTo('${b.homeTeam} ${b.awayTeam}'));
-    // ignore: avoid_print
-    print('LIVE ODDS LEAGUE SUPPLEMENT $fromText-$toText: ${sorted.length}');
+    // Konsole ruhig halten: erfolgreiche LiveOdds-League-Supplements werden nicht jedes Mal geloggt.
     return sorted;
   }
 
@@ -813,8 +817,7 @@ class LiveOddsService {
       if (savedDate == today) {
         _apiFootballDailyLimitReached = true;
         _apiFootballDailyLimitReachedAt = DateTime.now();
-        // ignore: avoid_print
-        print('API-FOOTBALL LIMIT FAST SKIP live odds persisted $today');
+        _logOnce('live_odds_fast_skip_persisted', 'API-FOOTBALL LIMIT FAST SKIP live odds persisted $today');
       } else if (savedDate != null && savedDate.isNotEmpty) {
         await prefs.remove(_apiFootballLimitDatePrefsKey);
       }
@@ -833,8 +836,7 @@ class LiveOddsService {
       return false;
     }
 
-    // ignore: avoid_print
-    print('API-FOOTBALL LIMIT SKIP live odds $context');
+    _logOnce('live_odds_limit_skip', 'API-FOOTBALL LIMIT SKIP live odds: Tageslimit aktiv.');
     return true;
   }
 
@@ -846,8 +848,7 @@ class LiveOddsService {
         .then((prefs) => prefs.setString(_apiFootballLimitDatePrefsKey, _formatDate(DateTime.now())))
         .catchError((_) => false);
 
-    // ignore: avoid_print
-    print('API-FOOTBALL DAILY LIMIT REACHED live odds ($context)');
+    _logOnce('live_odds_limit_reached', 'API-FOOTBALL DAILY LIMIT REACHED live odds ($context)');
   }
 
   bool _hasApiFootballDailyLimitError(Map<String, dynamic> decoded) {
